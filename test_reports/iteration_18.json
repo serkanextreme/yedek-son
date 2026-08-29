@@ -1,0 +1,42 @@
+{
+  "summary": "Faz 1 File Processing Engine E2E tested. Backend pytest: 21/21 pass covering TXT/PDF/CSV/PNG uploads, list scoping (extracted_text stripped), single GET (full text), summarize + cache, ask (grounded — 750 TL retrieved from content), delete + 404, unsupported .exe → 400, 51MB → 400, empty → 400, unauth → 401/403, multi-tenant isolation (2nd user cannot see/summarize/ask/delete another user's file), and regression on /chat + /memory + /tasks + /notes + /auth/me. Frontend: after clearing localStorage, login with serkan/19071987 works, all 5 sidebar tabs render (GEÇMİŞ/GÖREVLER/HAFIZA/DOSYALAR/NOTLAR), Dosyalar tab shows FilePanel + drop zone, file upload via input succeeds, file appears in list, expand shows Özetle/Sor buttons, Özetle produces summary, Sor modal accepts question and returns grounded Turkish answer containing '750', delete removes the file, other tabs still render. Zero console errors during the flow.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Sidebar tabs at default width (380px)",
+        "issues": [
+          "All 5 tab labels are truncated to ~2 characters (GE.../GÖ.../HA.../DO.../NO...) because the CSS makes each tab flex-1 and text truncates. Icons alone still allow guessing but labels are effectively unreadable until the sidebar is widened by the user. Consider (a) increasing DEFAULT_SIDEBAR_WIDTH to ~460px, (b) hiding the GripVertical icon at narrow widths so text has more room, or (c) rendering only the icon on <420px width. Not a functional bug — the data-testid selectors still work — but poor first-impression UX."
+        ]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_files.py",
+    "/app/test_reports/pytest/iter18_files.xml"
+  ],
+  "action_items": [
+    "OPTIONAL DESIGN: widen the default sidebar OR shorten tab visual chrome so the 5 tab labels aren't truncated to 2 chars at default width (see design_issues).",
+    "OPTIONAL CLEANUP: 7 leftover TEST_* files from repeated pytest runs remain in serkan's file list (soft-deleted ones plus a fresh set). A background cleanup or a bulk-delete admin API would help keep the demo clean, but not blocking."
+  ],
+  "critical_code_review_comments": [
+    "files_router.upload_file reads the entire body into memory BEFORE the size check (file.read() then len check). For a 100 MB upload this doubles peak memory. Recommend streaming into a bounded BytesIO with an early abort when the running total exceeds MAX_UPLOAD_BYTES, or use starlette's UploadFile chunking with a size guard. Same pattern already noted for /api/stt/whisper in iteration_17.",
+    "storage_service.put_object uses synchronous `requests` inside async request handlers — this blocks the event loop for the duration of the upload (potentially many seconds for 50MB files). Consider httpx.AsyncClient or run in a threadpool with asyncio.to_thread. Same applies to get_object.",
+    "file_service.extract_content calls sync CPU-heavy libs (pypdf, openpyxl, python-docx, pptx) directly inside an async function — these will block the loop for large documents. Wrap them in asyncio.to_thread(...).",
+    "extraction status='ok' is set based purely on `bool(text and text.strip())` — an image whose vision analysis returned only whitespace would be flagged 'partial' with error 'İçerik boş' rather than showing a real vision error. Consider surfacing partial vs failed separately from LLM error stream.",
+    "files_router.upload_file has no client-visible retry / idempotency for storage 502s — if the object storage put_object fails mid-request, the DB has no record but the file might exist upstream (or not). Consider a temporary local staging directory + background move OR two-phase commit.",
+    "file_service.MAX_TEXT_CHARS = 200_000 and SUMMARY_MAX_CHARS = 60_000 are hard-coded — should be ENV-tunable and logged in the extraction record so users understand truncation.",
+    "The Ask endpoint accepts arbitrarily long questions but doesn't rate-limit — one impatient user could hammer /files/{id}/ask and burn LLM budget. Consider a token-bucket per user_id.",
+    "Sidebar.jsx / FilePanel.jsx onDelete uses window.confirm() which is a blocking browser dialog inconsistent with the rest of the app's sonner-toast UX. Prefer AlertDialog from /components/ui/alert-dialog for consistency."
+  ],
+  "updated_files": ["/app/backend/tests/test_files.py"],
+  "success_rate": {"backend": "100% (21/21)", "frontend": "100% (all flows: login, tabs, upload, expand, summarize, ask, delete, regression tabs)"},
+  "test_credentials": "serkan / 19071987",
+  "seed_data_creation": "Created several TEST_*.txt/pdf/csv/png files and one throwaway 'testuser_*' account (auto-deleted). Some TEST_ files remain in serkan's Files list after test runs (see action_items).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Faz 1 file processing works end-to-end: TXT/PDF/CSV/PNG upload → extraction (with GPT-5.2 Vision for images) → summarize (cached on 2nd call) → ask (grounded on content) → soft-delete. Multi-tenant isolation is enforced at every endpoint (list/get/summarize/ask/delete → 404 for non-owner). Key data-testids: tab-files, file-panel, file-drop-zone, file-upload-input, file-upload-btn, file-list, file-item-{id}, file-toggle-{id}, file-summarize-{id}, file-ask-{id}, file-ask-modal, file-ask-input, file-ask-submit, file-ask-answer, file-ask-close, file-delete-{id}. Turkish grounding works — 'Toplam gelir ne kadar?' on a file containing '750 TL' returns 'Toplam gelir 750 TL.' Login is serkan/19071987. LocalStorage keys to clear when needed: sertex_token_v1, sertex_tab_order_v1, sertex_sidebar_dims_v1. Summarize/ask each take 5-25s (LLM cold latency).",
+  "rca of the issue": "No functional issues found. The 'chat still works' test initially failed only because my test assertion used the wrong response key ('reply' vs 'assistant_message.content') — I fixed the assertion, not the code, and it now passes. The rest of the design_issues (truncated tab labels) is a UX polish suggestion, not a bug."
+}

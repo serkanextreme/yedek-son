@@ -1,0 +1,30 @@
+{
+  "summary": "Faz 8 CP6 (Multi-company + Orphan Tasks + 3-mode delete + Cross-manager consent) full-stack tested. Backend: 15/15 new test_multi_company.py pytests GREEN (TestCompanyMembers 4, TestOrphanTasks 4, TestUserDeleteModes 3, TestCrossCompanyFlow 4) + 94/94 regression (test_permissions 20, test_tasks 22, test_team_faz2 10, test_task_reassign 5, test_task_categories 8, test_workspace_and_company 16, test_due_soon 13) = 109/109 total. Frontend Playwright verified: (a) Sidebar tab-orphans present for admin+manager, HIDDEN for employee (RBAC visibility correct). (b) OrphanTasksPanel empty state 'SİCİLİN TEMİZ' renders via [data-testid=orphan-empty]. (c) Admin → Ayarlar → Kullanıcılar → admin-delete-{username} opens delete-user-modal with all 3 modes (delete-mode-soft = 'ADINI KORU (ÖNERİLEN)', delete-mode-purge = 'TAM SIL (KVKK)', delete-mode-hard = 'NÜKLEER SIL (DİKKAT!)') and delete-confirm button. (d) Companies management → expand → perm-toggle-{Ca}-to-{Cb} 3-state cycles GÖRMÜYOR → GÖRÜR (admin instant-active) → GÖRMÜYOR (revoke) verified live. Cross-tenant isolation validated in backend test_manager_sees_own_company_orphans_only (manager A does NOT see manager B's orphans).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Settings modal (Ayarlar) header tabs", "issues": ["When the Companies (ŞİRKETLER) subtab is on and the tabs row wraps to 2 lines, the top-level tabs 'RENKLER/TEMALAR/ALARM/HESAP/MOD/UYARILAR/KULLANICILAR' overlap slightly at 1920px viewport — visible in screenshot admin_delete_modal.png. Cosmetic only, all buttons remain clickable."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_multi_company.py",
+    "/app/test_reports/pytest/multi_company.xml",
+    "/app/test_reports/pytest/regression_cp6.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "CompaniesManagement.jsx uses c.name in data-testid (perm-toggle-{name}-to-{name}) — company names with spaces (e.g., 'Test Company A') produce spaces in testids which is legal but fragile; consider using company IDs for testids in future.",
+    "test_multi_company.py::TestOrphanTasks::test_reassign_orphan_clears_flags soft-passes even if self-visibility grant fails (only asserts when status_code==200). Consider explicit else-branch skip/xfail to avoid silent green.",
+    "test_multi_company._cleanup wipes ENTIRE company_permissions collection between test runs — safe in test env but risky if run against a shared DB; scope the deletion by viewer_company_id/target_company_id in CP6_ ids."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (109/109: 15 new multi_company + 94 regression)", "frontend": "100% (tab-orphans RBAC ✓, orphan-empty ✓, delete-modal 3-mode ✓, cross-perm 3-state toggle ✓)"},
+  "test_credentials": "serkan/19071987 (admin), mgr_test/mgr12345 (manager), emp1_test/emp12345 (employee). All login-verified during this iteration.",
+  "seed_data_creation": "test_multi_company.multi_company_grid fixture creates 2 companies (CP6_CompanyA/B), 2 managers (CP6_mgrA/B), 1 shared multi-membership employee (CP6_ahmet) and cleans up on module teardown.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Faz 8 CP6 is FUNCTIONALLY COMPLETE and GREEN across the stack. Ayarlar (settings) button is inside SISTEM panel top-left, not sidebar. Sidebar tab tab-orphans sits between tab-team and tab-memory. Delete modal testids: delete-user-modal, delete-mode-{soft|purge|hard}, delete-confirm, delete-cancel. Cross-perm toggles are inside CompaniesManagement (settings-tab-companies) and require expanding a company row first via 'button:has-text(company_name)'. perm-toggle-{srcName}-to-{tgtName} uses NAMES (with spaces) not IDs. Backend orphan/delete-mode fan-out logic verified via direct DB assertions in test_multi_company.py.",
+  "rca of the issue": "No blocker or functional bug found. All 21 review-request line items (backend #1-15 + frontend #16-20) verified GREEN."
+}

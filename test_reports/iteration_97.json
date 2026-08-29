@@ -1,0 +1,25 @@
+{
+  "summary": "Verified fix for İş Kolu sub-category visibility bug (iteration 97). Backend: scope=my_tasks now returns children via ancestor visibility inheritance (3/3 pytest passing). Frontend: create form CategorySelect and Edit modal <select data-testid=edit-category> both list sub-categories; edit modal shows breadcrumb 'Fason Verme › QA_alt_kol'. Selecting sub-category in edit modal and saving persists task.category_id correctly.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_task_categories_inheritance.py",
+    "/app/test_reports/pytest/iteration_97.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "tasks_router.list_task_categories(my_tasks) walks ancestor chain in-memory over up to 5000 rows per request. Fine at current scale; if categories grow, consider caching the by_id map or precomputing an inherited-visibility flag on write to keep O(depth) per row (already O(depth) but with fresh full fetch each call).",
+    "The _visible() ancestor walk uses `seen` set to guard cycles, which is correct; ensure the create/update endpoints reject cycles in parent_id to keep this defensive-only.",
+    "REMINDER_DAY_CHOICES option rendering triggers a React hydration warning (<span> child of <option>) in EditTaskModal.jsx around line 245 — not a functional bug but shows repeatedly in console. Consider rendering plain text child instead of the ve-dynamic <span>."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_task_categories_inheritance.py (NEW — 3 tests)"
+  ],
+  "success_rate": {"backend": "100% (3/3)", "frontend": "100% (create form + edit modal + save-persistence all verified)"},
+  "test_credentials": "serkan / 19071987 (admin)",
+  "seed_data_creation": "Created + cleaned up: category 'QA_alt_kol' (child of 'Fason Verme'), task 'QA_edit_test_task'. All removed at end.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 97 bug (sub-categories missing from Düzenle) fully verified fixed. Backend test file /app/backend/tests/test_task_categories_inheritance.py is a keepable regression test. Note task-menu items in TasksPanel are custom divs (no role=menuitem); target by text 'DÜZENLE'/'Düzenle' or add data-testids to the DropdownMenu.Item children if needed. There is a benign hydration warning re: <span> inside <option> in EditTaskModal reminder select.",
+  "rca of the issue": "list_task_categories(scope=my_tasks) filtered categories using only direct visibility (owner company_id / visible_to_company_ids / visible_to_user_ids). Sub-categories inherit only company_id from parent — not the visibility grant fields — so they were filtered out of the my_tasks response and consequently missing from CategorySelect (create form) and edit-category <select> (edit modal). Fix (backend/routers/tasks_router.py:673+): build a by_id map and walk parent_id ancestor chain; a category is visible iff itself OR any ancestor is directly visible. Verified via pytest and via UI (create dropdown + edit modal breadcrumb 'Fason Verme › QA_alt_kol' + persistence on save)."
+}

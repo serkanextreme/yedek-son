@@ -1,0 +1,39 @@
+{
+  "summary": "Faz 9 CP4.35 P1 fix validation + full regression. Backend: 56/56 iter60-64 regression suite GREEN (test_tasks_locks + test_tasks_lock_audit + test_tasks_user_policy + test_lock_policy_templates + test_p0_cp434). P1 new suite (test_p1_cp435.py, 11 tests): 10 PASS, 1 FAIL (locked_by attribution). P1 verifications: (1) Template validation — 81-char name → 400 'en fazla 80 karakter' ✓; 501-char description → 400 '500' ✓; empty name → 400 ✓; valid → 201 ✓; PATCH name>80 → 400 ✓. (2) Cap enforcement — manager filled to exactly 50 templates, 51st → 400 with '50 şablon' text ✓; admin cap independent from manager (admin can add template while mgr at 50) ✓. (3) delete_task used_otp — (a) admin deletes unlocked task → audit used_otp=false ✓; (b) ahmet has lock_edit=true + active OTP window but delete NOT locked → deletes → used_otp=false ✓ (this is the CP4.35 fix — previously would falsely be true); (c) ahmet with lock_delete=true + verified OTP → deletes → used_otp=true ✓. (4) Double inherit — managed lock_flags = {lock_delete, lock_edit} correct; self_lock_flags = {lock_complete} (lock_delete deduped, managed wins) correct; locked_at set correct. FAILURE: locked_by attribution — when ahmet self-patches AFTER admin's managed patch, task inherits locked_by=ahmet instead of admin. RCA: patch_user_lock_flags writes default_lock_set_by_user_id in BOTH channels (managed branch + self branch), so a subsequent self patch overwrites the managed policy owner. create_task then reads that single field and mis-attributes the managed lock. Frontend smoke: admin serkan login OK, dashboard renders (SERTEX title, weather 27.9°C, task counter 4/5, memory/notes panels), no active error banners on page. No console errors during login+dashboard render.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "POST /api/tasks (create_task double-inherit path, tasks_router.py:522)",
+        "issue": "locked_by attribution for MANAGED inherited lock is overwritten to whoever last patched user policy — including the assignee's own self-lock patch. RCA: patch_user_lock_flags stores default_lock_set_by_user_id as a SINGLE shared field regardless of channel (managed vs self), so admin sets it → ahmet self-patches → field now = ahmet → next created task's managed lock is attributed to ahmet. Break: audit trail lies about who set the strict lock; assignee appears to have imposed lock on themselves. Fix: store default_lock_set_by_user_id per channel (e.g. default_lock_managed_set_by_user_id vs default_lock_self_set_by_user_id) and read the managed one in create_task. Verified: task with ONLY managed patch (no self) correctly attributes locked_by=admin — so the fix works in isolation, breaks only under the double-inherit scenario."
+      }
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_p1_cp435.py",
+    "/app/backend/tests/test_p0_cp434.py",
+    "/app/backend/tests/test_tasks_locks.py",
+    "/app/backend/tests/test_tasks_lock_audit.py",
+    "/app/backend/tests/test_tasks_user_policy.py",
+    "/app/backend/tests/test_lock_policy_templates.py"
+  ],
+  "action_items": [
+    "FIX P1 locked_by attribution regression: split default_lock_set_by_user_id into two channel-scoped fields (managed vs self) OR only write it in the managed branch. Currently the assignee's own self-lock patch corrupts the managed-lock policy-owner attribution. See tasks_router.py:1241-1248 (patch_user_lock_flags) and :522 (create_task inheritance)."
+  ],
+  "critical_code_review_comments": [
+    "tasks_router.py:522 — `t.locked_by = policy_doc.get('default_lock_set_by_user_id') or user['id']`. The read source is a single mutable field shared with the self-lock channel — see :1241 & :1247. Any assignee self-patch overwrites the managed policy owner. Recommended: `default_lock_managed_set_by_user_id` for strict channel, `default_lock_self_set_by_user_id` for self channel; create_task reads only the managed one.",
+    "tasks_router.py:639 — delete_task audit `used_otp` computation is now correct: only checks if the delete action itself was locked (was_delete_locked = lock_delete OR self_lock_delete). Prior bug fixed. Good.",
+    "tasks_router.py:1315-1335 — template validation is airtight (empty/81+/501+/cap 100 admin, 50 manager, per-creator via count_documents with created_by filter). No SQL-inject-style bypass surface since values pass through Pydantic then re-stripped/measured.",
+    "TasksPanel.jsx:207-254 — playReminderBeep returns proper `{cancel}` handle that clears BOTH secondBeepTimer and closeTimer + closes AudioContext. Race-safe against unmount. beep() wrapper (:2562) tracks in activeBeepsRef Set, cleanup useEffect (:2556) cancels all on unmount. Solid implementation.",
+    "Manager cap 50 is enforced per-creator using created_by index scan; existing tests confirm independence between creators. However list_lock_policy_templates returns ALL templates to any manager — under a heavy multi-tenant deployment consider filtering to created_by = self OR company scope."
+  ],
+  "updated_files": ["/app/backend/tests/test_p1_cp435.py (new — 11 P1 fix tests)"],
+  "success_rate": {"backend": "66/67 = 98.5% (56/56 regression + 10/11 P1 new; single failure is bug not test flake)", "frontend": "100% smoke (login, dashboard render, no console errors)"},
+  "test_credentials": "admin: serkan/19071987 ; employee: ahmet/ahmet123 ; manager: mgr_test/mgr12345",
+  "seed_data_creation": "test_p1_cp435.py creates TEST_P1_* templates + tasks, tears down in finally blocks; also resets emp user policy at end of double-inherit test.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "P1 fix set has ONE remaining defect: locked_by attribution broken under double-inherit. Reproduce via test_p1_cp435.py::TestP1CreateTaskDoubleInherit::test_managed_and_self_dedup_managed_wins. All other P1 fixes verified. Run: `cd /app/backend && REACT_APP_BACKEND_URL=$(grep REACT_APP_BACKEND_URL /app/frontend/.env | cut -d= -f2) MONGO_URL=mongodb://localhost:27017 DB_NAME=test_database python -m pytest tests/test_p1_cp435.py tests/test_p0_cp434.py tests/test_tasks_locks.py tests/test_tasks_lock_audit.py tests/test_tasks_user_policy.py tests/test_lock_policy_templates.py -v -o addopts=''`. Once main agent fixes the shared-field attribution issue in patch_user_lock_flags + create_task, all 67 tests should be green.",
+  "rca of the issue": "Double-inherit locked_by regression: patch_user_lock_flags (tasks_router.py:1220-1252) has two mutually-exclusive branches (is_self+non-admin/mgr → self channel, else → managed channel), but BOTH write `default_lock_set_by_user_id: user['id']` into the users doc. This single field is then read at create_task (:522) as the policy-owner for the MANAGED lock only. When admin sets managed and ahmet later sets self, the field ends up as ahmet's id; a new task's managed lock gets attributed to ahmet (the assignee), misleading the audit trail. Repro: PATCH /users/{eid}/lock-flags as admin with managed flags → PATCH /users/{eid}/lock-flags as ahmet with self flags → POST /tasks (assignee=ahmet) → task.locked_by == ahmet.id (WRONG, should be admin.id). Mitigation: introduce channel-specific attribution fields OR only write default_lock_set_by_user_id in the managed branch (self channel doesn't need attribution since it's owner-managed by definition)."
+}

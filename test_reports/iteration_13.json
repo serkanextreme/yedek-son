@@ -1,0 +1,28 @@
+{
+  "summary": "PASS — HIGH bug fix from iteration_12 is now landed and working end-to-end. Verified: (1) direct curl to POST /api/auth/login for serkan/19071987 returns response.user.role='admin'; (2) Playwright e2e — localStorage cleared, hard reload, logged in as serkan, IMMEDIATELY opened Ayarlar (Settings) — KULLANICILAR tab (data-testid='settings-tab-users') is present and visible without any additional page reload. Clicking the tab works. Backend fix at /app/backend/auth.py::login (lines 149-153) now emits role in the user dict as required.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/iteration_13.json"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "auth.py::login return payload is now correct — user dict includes role. Fix verified via curl and UI.",
+    "Optional hardening (unchanged from iter_12 suggestion): frontend/src/lib/auth.js could still re-hydrate via /auth/me after setToken as a defensive single-source-of-truth pattern, but not required — current fix is sufficient."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (targeted regression passes)", "frontend": "100% (KULLANICILAR tab visible on first login)"},
+  "test_credentials": "serkan / 19071987",
+  "seed_data_creation": "None. db.login_attempts was not touched — serkan not locked out. Login succeeded on first attempt.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Targeted retest of the HIGH bug (login response missing role → admin tab hidden until reload) — both backend curl and frontend Playwright checks now PASS. Per main agent's instruction, the full multi-user regression suite was NOT re-run in this iteration; that remains as previously verified in earlier iterations.",
+  "rca of the issue": "Root cause was a missing `role` field in the /api/auth/login response.user dict. Fix applied at /app/backend/auth.py lines 149-153: user dict now contains id, username, and role (defaulting to 'user' if missing). Backend was restarted so the new module is loaded. Verified with `curl /api/auth/login` and confirmed with an end-to-end Playwright flow that the Kullanıcılar admin tab renders immediately after login."
+}

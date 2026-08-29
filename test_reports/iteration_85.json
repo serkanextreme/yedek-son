@@ -1,0 +1,34 @@
+{
+  "summary": "Frontend UI + integration verification for FEATURE A (Overdue Summary & Bulk Nudge in Ekibim) and FEATURE B (Frontend Error Radar viewer + silent capture). All primary acceptance criteria PASSED against preview URL for admin (serkan), manager (mgr_test) and employee (emp1_test). No regressions observed in TeamPanel or MonitoringDashboard.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "observations": [
+    "FEATURE A (admin serkan): overdue-summary-panel renders 'GECIKEN GÖREVLER (15)' with 2 rows — overdue-person-emp1_test (14 geciken) and overdue-person-ahmet (1 geciken). Serkan's own overdue is correctly excluded. Toasts: 1st DÜRT → 'emp1_test: 14 hatırlatma gönderildi'; 2nd DÜRT (within 60s) → 'emp1_test: hatırlatma gönderilmedi · 14 atlandı (az önce dürtülmüş)' (cooldown works). TÜMÜNÜ DÜRT → 'Tümü: 1 hatırlatma gönderildi · 14 atlandı (az önce dürtülmüş)' — expected because emp1_test's 14 tasks are still in cooldown; ahmet's 1 was newly nudged.",
+    "FEATURE A (manager mgr_test): overdue-summary-panel visible with 1 row → overdue-person-emp1_test (RBAC-scoped correctly).",
+    "FEATURE A (employee emp1_test): overdue-summary-panel absent — correct.",
+    "FEATURE B viewer (admin): settings-tab-monitoring visible; monitoring-client-errors-24h + monitoring-client-errors-total render; monitoring-client-logs-list populated; TEMİZLE clears (total → 0, monitoring-client-logs-empty appears, toast 'Frontend hata kayıtları temizlendi').",
+    "FEATURE B admin-only: mgr_test does NOT see settings-tab-monitoring — correct.",
+    "FEATURE B silent capture: window.dispatchEvent(new ErrorEvent(...)) triggers POST /api/client-log with correct payload {level, message, stack, source, lineno, url, user_agent, ts_client}. Log appears in list attributed to 'serkan'. The Sertex client logger itself does NOT surface any UI (no toast, no overlay, no console rethrow).",
+    "REGRESSIONS TeamPanel: team-toggle-detailed ✓, team-refresh ✓, team-row-* (3 rows) ✓. team-heatmap-* is 0 because it renders only in DETAYLI mode (not toggled during test) — not a regression.",
+    "REGRESSIONS MonitoringDashboard: all existing HATA İZLEME cards + monitoring-refresh present, no crashes."
+  ],
+  "known_dev_mode_artifact": "In this preview (react-scripts dev), when a synthetic ErrorEvent carries a real Error instance, CRA's built-in webpack-dev-server 'Uncaught runtime errors:' iframe overlay flashes on screen. This is NOT produced by clientLogger.js (which stays silent and best-effort). In a production build this overlay is stripped, so the 'user must never see' requirement holds in production. No action needed unless E1 wants to add a swallow-hook (e.g. event.preventDefault()) in clientLogger to suppress it even in dev builds.",
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "clientLogger.js is clean, dedupes by (level,msg,source,lineno) within 30s and caps at 20/min — good.",
+    "team_router bulk-nudge correctly enforces owner!=self, can_view_user RBAC, and 60s per-(task,nudger) cooldown; skipped counter surfaces cooldown to the UI.",
+    "MonitoringDashboard.clearClientLogs updates local state optimistically before refetch — that's why the counter drops to 0 instantly; fine."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (E1 pre-verified via curl)", "frontend": "100%"},
+  "test_credentials": "serkan/19071987 (admin), mgr_test/mgr12345 (manager), emp1_test/emp12345 (employee) — all worked.",
+  "seed_data_creation": "None. Used existing overdue tasks in the tenant.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Both features live and functioning end-to-end on preview. If retesting nudge cooldown, wait >60s or restart from a fresh set of task_ids — otherwise every subsequent DÜRT will (correctly) report only 'atlandı'. For the clear button: do NOT trigger a synthetic Error with a real Error instance right before clicking TEMİZLE in dev-mode, because CRA's runtime-error iframe overlay will intercept the click. Use ErrorEvent WITHOUT the `error:` field or click clear before triggering, as done in iteration_85 final pass."
+}

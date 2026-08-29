@@ -1,0 +1,34 @@
+{
+  "summary": "Mobile-only frontend test of TAKIM sub-tabs (Faz C). All 4 sub-tab chips render with correct testIDs and switch content; active chip visibly highlighted (cyan). KİŞİLER shows 3 member cards (serkan admin view: emp1_test/mgr_test/ahmet) with progress bar + Toplam/Tamam/Bekleyen/Gecikmiş stats fed from /api/team/summary. İŞ KOLLARI renders category cards (Kolsuz, Fason Verme) with progress + Açık/Beklet/Geciken/Yaklaşan chips; PDF Paylaş and Excel Paylaş buttons render. Tapping PDF on the web preview does NOT crash — it caught the native-only failure and displayed the inline 'Rapor paylaşılamadı' message (acceptable per request). Excel tap likewise no crash and no red screen. GECİKENLER shows summary bar '1 kişide 13 geciken görev' and 1 person card for emp1_test with 5 tasks + '+8 görev daha'; tapping 'Hepsini Dürt' called POST /api/team/bulk-nudge and the button was replaced with '✓ 13 hatırlatma gönderildi'. Tapping an overdue task row navigated to /task/{id} (Görev detay screen) as expected. ISI HARİTASI shows Az…Çok legend and 3 heatmap rows (team-heatmap-row-<uid>) each with a horizontally-scrollable strip of day cells. All expected testIDs match; no red-box, no unhandled console errors from Faz C code.",
+  "platforms_tested": ["mobile"],
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "web": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+    "mobile": {
+      "ui_bugs": [],
+      "integration_issues": [],
+      "design_issues": [
+        {"screen": "GECİKENLER", "issues": ["All overdue task rows show due date '01.01 00:00' — this appears to be test-data (T2_Test* tasks seeded with due_date at year start) rather than a UI bug, but visually every task looks like it has the same due timestamp. Worth confirming with fresh non-fixture data."]}
+      ],
+      "react_native_issues": [
+        {"component": "react-native-web (dep warning)", "issue": "Console warning: 'props.pointerEvents is deprecated. Use style.pointerEvents'. Coming from a dependency (not from Faz C code); can be ignored for now but worth tracking if RN 0.75+ removes it."}
+      ]
+    }
+  },
+  "parity_issues": [],
+  "test_report_links": ["/app/test_reports/iter117_people.png", "/app/test_reports/iter117_categories.png", "/app/test_reports/iter117_overdue.png", "/app/test_reports/iter117_nudge_after.png", "/app/test_reports/iter117_heatmap.png"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "OverdueTab.nudge(): if the person's overdue task list has 0 tasks the call still fires with an empty task_ids array — consider disabling the button when tasks.length === 0 (defensive; not observed in this run).",
+    "CategoryTab.doShare(): swallows the underlying error with a bare catch — for future debugging, log the error (console.warn) so native-vs-web share failures are distinguishable in Sentry/logs.",
+    "categoryReportMobile.ts imports 'expo-file-system/legacy' — flag for future migration when expo-file-system removes the legacy shim."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (skipped)", "frontend": "100%"},
+  "test_credentials": "serkan / 19071987 (admin) — used per test_credentials.md",
+  "seed_data_creation": "None — used existing users emp1_test, mgr_test, ahmet in Test Company A.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Faz C mobile TAKIM sub-tabs verified end-to-end on Expo web preview (viewport 414x896) as serkan admin. All 4 sub-tabs, PDF/Excel report buttons (inline share-error path on web), bulk-nudge, task navigation, and heatmap render function fine. Native share sheets (expo-print / expo-sharing) are NOT invoked on web preview — that path can only be validated on a native build. If retesting, be aware that pressing 'Hepsini Dürt' sends real notifications to emp1_test.",
+  "rca of the issue": ""
+}

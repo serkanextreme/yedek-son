@@ -1,0 +1,30 @@
+{
+  "summary": "Verified P0 feature 'Görev Paylaşımı + Çok Kişili Atama' end-to-end. Backend pytest test_task_sharing.py = 7/7 pass (serial). Frontend E2E covered: multi-assignee create, share modal (search, add row, 5 perm chips with view locked-on, notify toggle, save), eye badge on shared task, cross-role visibility (mgr_test sees admin's shared task + eye badge), per-user own-completion checkbox (own interactive, others read-only), progress line 'X/Y tamamlandı' updates on toggle, task_shared notification 'serkan bir görevi seninle paylaştı' renders in bell with link to task, single-assignee regression (ownership transfer to ahmet works). One minor bug: eye badge tooltip (title attr) duplicates names (concatenates assignees + shared_with without dedupe).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "TasksPanel eye badge tooltip", "issue": "title attribute duplicates names — observed 'Bu görevi görenler: mgr_test, emp1_test, emp1_test, mgr_test' when the task has both a multi-assignee list and a shared_with list containing the same people. Needs dedupe by user_id/username before joining.", "selector": "[data-testid=\"task-shared-badge-{id}\"] title attribute", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_task_sharing.py"
+  ],
+  "action_items": [
+    "Dedupe user names in the task-shared-badge tooltip (title attr). Union assignees ∪ shared_with by user_id/username so a person only appears once."
+  ],
+  "critical_code_review_comments": [
+    "TasksPanel.jsx is very large (~2590 lines). Consider extracting the multi-assignee card block and context menu items into dedicated subcomponents for maintainability.",
+    "Eye-badge tooltip currently uses native 'title' attribute which doesn't format as a rich Sertex HUD tooltip. Consider using the same tooltip primitive used elsewhere for consistency.",
+    "Single-assignee path stores assignee_name string and transfers ownership via user_id; assignee_user_id on task remains null. Documented but slightly asymmetric with the multi-assignee model (assignees[]). Not a bug, just a note."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (7/7 test_task_sharing)", "frontend": "~95% (12/12 flows worked; 1 tooltip cosmetic dup)"},
+  "test_credentials": "serkan/19071987 (admin), mgr_test/mgr12345, emp1_test/emp12345 — all present in /app/memory/test_credentials.md",
+  "seed_data_creation": "Created QA_MULTI_* and QA_SINGLE_* tasks during E2E; all cleaned up (4 deleted via API at test end).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend pytest MUST be run serially with -n 0 and REACT_APP_BACKEND_URL exported to avoid single-session token kicks. Dismiss overdue-alert-close before UI actions. Assignee IDs currently in DB: mgr_test=sertex-enterprise, emp1_test=sertex-enterprise, ahmet=sertex-enterprise. localStorage token key is 'sertex_token_v1'.",
+  "rca of the issue": "Eye-badge tooltip dedupe bug RCA: badge title is composed by concatenating names from task.assignees[] and task.shared_with[]. When the same user is both an assignee and appears in shared_with (or duplicate share entries), the tooltip repeats them. Fix: use a Set keyed by user_id (fallback username) before Array.join(', '). Reproduction: create multi-assignee task with mgr_test+emp1_test, then share with the same emp1_test → hover badge, see duplicates in title."
+}

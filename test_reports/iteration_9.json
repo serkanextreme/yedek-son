@@ -1,0 +1,33 @@
+{
+  "summary": "Full backend + frontend verification of the new Tasks features: (1) 'overdue' status value, (2) reminder_at/reminder_fired fields, (3) edit modal, (4) Hatırlat submenu with 5 presets + custom datetime picker, (5) reminder scheduler firing. Backend: 22/22 pytest tests pass (added 6 new tests: TestTasksOverdueStatus + TestTasksReminder covering all reminder edge cases — auto-reset of reminder_fired on reminder_at change, null clears, explicit reminder_fired=true, POST with reminder_at). Frontend: Verified via Playwright end-to-end — menu items adapt to task status (ctx-pending correctly hidden when task is pending), ctx-overdue flips status and card turns red with 'SÜRESİ GEÇTİ' badge, edit modal opens/saves title, Hatırlat submenu shows all 5 presets + custom input + KAYDET, 30m preset sets task.reminder_at with 'HATIRLATMA: ...' row on card, ctx-reminder-cancel clears it (and only appears when reminder is set), custom datetime input via page.fill+KAYDET works, and the reminder scheduler DOES fire — created task via API with reminder_at=now+3s, waited ~25s, verified server flipped reminder_fired to true and the card renders with dimmed bell + ✓. All features from the review request are working end-to-end.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_tasks.py",
+    "/app/test_reports/pytest/sertex_tasks.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Backend PATCH /api/tasks/{id} correctly auto-resets reminder_fired=false when reminder_at is changed but reminder_fired is not explicitly passed — verified via test_patch_sets_reminder_and_resets_fired.",
+    "Reminder scheduler window is now-5min..now (line 540 TasksPanel.jsx: `when <= now && when > now - 5*60*1000`). A task with reminder_at older than 5 minutes will NEVER fire (e.g., if user closes the tab and reopens 10 min later). Consider firing anything past-due-and-not-fired, or extending the window. Not a bug per requirements, but a UX gap for offline users.",
+    "useReminderScheduler check interval is 20s (line 546). Reminders can fire up to ~20s late; acceptable but worth noting. First check runs immediately on mount which is correct.",
+    "playReminderBeep opens a new AudioContext every fire — could accumulate in long sessions but is quickly garbage-collected in practice. Not blocking.",
+    "TasksPanel.jsx is now 818 lines — over the 700-line guideline. Consider extracting ContextMenu, EditTaskModal, TaskCard, and useReminderScheduler into their own files for maintainability.",
+    "EditTaskModal saveEdit sends due_date: null when field cleared — but backend PATCH TaskUpdate uses exclude_unset so explicit null WILL clear. Correct behavior verified.",
+    "The ContextMenu portal fix from iteration_7/8 still holds — verified visually (menu opens next to 3-dot button, submenu renders correctly)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_tasks.py"
+  ],
+  "success_rate": {"backend": "22/22 = 100%", "frontend": "14/14 assertions = 100% (menu items adapt, ctx-overdue, edit modal, 5 presets present, ctx-reminder-30m, ctx-reminder-cancel visibility & effect, custom reminder via fill+KAYDET, scheduler fires within 25s and reminder_fired flips server-side)"},
+  "test_credentials": "username=serkan, password=19071987 (working)",
+  "seed_data_creation": "Created transient TEST_UI_* and TEST_FIRE_* tasks during Playwright flow; all cleaned up via ctx-delete or DELETE /api/tasks/{id} at end of each sub-test. Lingering TEST_UI_1784556121_EDITED from prior iteration was also cleaned up.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Tasks feature-set for iteration 9 (edit modal + overdue + reminder submenu + scheduler firing) is fully verified backend + frontend. If revisiting: (1) datetime-local input needs page.fill (NOT el.value = ...) to update React controlled state — see test_reminder_custom flow. (2) reminder scheduler checks tasks every 20s and fires anything with when<=now && when>now-5min && !reminder_fired && status!=='done'. (3) POST /api/tasks accepts reminder_at. (4) PATCH auto-resets reminder_fired when reminder_at changes without explicit reminder_fired flag. Login: serkan / 19071987 → click GÖREVLER tab in right sidebar.",
+  "rca of the issue": "No new issues found. Prior context menu positioning issue (iteration_7 → fixed via createPortal(document.body) in iteration_8) remains resolved; ctx-reminder submenu also renders correctly inside the portaled menu."
+}

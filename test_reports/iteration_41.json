@@ -1,0 +1,48 @@
+{
+  "summary": "iteration_41 (batch 42 features): workspace_mode toggle + task-level assignee_name/company_name + admin company field + company grouping. Backend: 16/16 new pytest green (test_workspace_and_company.py). Regression: 62/62 existing pytest green (test_stats_summary, test_system_quota, test_admin_user_quota, test_tasks). Frontend: MOD tab, workspace-mode-personal/team cards, toasts, persistence — all verified. KULLANICILAR tab: admin-company-{username} button, badge, admin-company-group-{key} collapsible grouping, toggle collapse — all verified. Cleanup complete: ahmet has no company_name and workspace_mode=personal (verified via API).",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "acceptance_criteria_results": {
+    "1_workspace_mode_login": "PASS — login response contains user.workspace_mode (default 'personal').",
+    "2_workspace_mode_me": "PASS — GET /api/auth/me returns workspace_mode.",
+    "3_workspace_mode_put": "PASS — PUT accepts 'personal'/'team' (200), rejects 'invalid' (400), rejects unauth (401), persists to db.users.workspace_mode.",
+    "4_task_owner_fields_create": "PASS — POST /api/tasks with assignee_name+company_name → returned in Task object.",
+    "5_task_owner_fields_optional": "PASS — POST without owner fields succeeds; fields absent/null in response.",
+    "6_task_owner_fields_patch": "PASS — PATCH updates assignee_name+company_name.",
+    "7_task_regression": "PASS — status change, due_date, reminder_at, subtasks all still functional (test_tasks.py 22/22).",
+    "8_admin_companies_list": "PASS — GET /api/admin/companies returns {companies:[...]}, admin-only (403 for non-admin). Dynamically reflects assigns/unassigns.",
+    "9_admin_user_company_flow": "PASS — PATCH /api/admin/users/{id} with company_name assigns, updates, and $unsets on empty string. Non-admin PATCH → 403.",
+    "10_frontend_settings_mod_tab": "PASS — [data-testid=settings-tab-workspace] visible, tabs render workspace-mode-personal + workspace-mode-team cards, AKTİF indicator switches on click, toast 'Ekip moduna geçildi' / 'Kişisel moda geçildi' shown, workspace_mode persists across reload.",
+    "11_frontend_admin_company_row": "PASS — [data-testid=admin-company-ahmet] button opens window.prompt, saves via PATCH, shows [data-testid=admin-company-badge-ahmet] and toast 'ahmet → TEST_AcmeUI'. Empty prompt clears company + removes badge.",
+    "12_frontend_company_grouping": "PASS — [data-testid=admin-company-group-TEST_AcmeUI] appeared above admin-company-group-none (BİREYSEL) after assignment. Toggle button collapsed group; visible user rows went 3→2. After cleanup (empty company), group disappeared, all users back under BİREYSEL.",
+    "13_cleanup": "PASS — ahmet's company_name is unset and workspace_mode='personal'. Verified via zzz_cleanup_final_state test + direct /api/auth/me + /api/admin/users inspection.",
+    "14_iteration_38_39_40_41_regression": "PASS — All 62 existing pytest still green (test_stats_summary, test_system_quota, test_admin_user_quota, test_tasks)."
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_workspace_and_company.py",
+    "/app/test_reports/pytest/iteration_41_workspace_company.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "pytest-xdist parallel workers race with the single-session-kick rule (SESSION_KICKED). New test file works when run with -o addopts='' (serial). If a future agent runs the full suite in parallel, they must disable xdist or scope logins per worker. Non-blocking, but noted.",
+    "PUT /api/settings/workspace-mode returns 401 for unauth (via require_current_user dep) which the spec called out as 401 — matches.",
+    "AdminUpdateUserRequest.company_name = '' correctly triggers $unset (server.py L571-577), preserving contract that non-string None leaves the field untouched.",
+    "Frontend badge text is truncated to 'TEST_A…' (ellipsis) on narrow rows — expected behavior per current CSS. Full name available in tooltip if implemented; acceptable.",
+    "In personal mode with ahmet, [data-testid=task-assignee-input] and [data-testid=task-company-input] are guarded by isTeamView — spec says 'DOM'da OLABİLİR ama is_visible=False'. Not directly verified in the E2E run (task form wasn't opened in personal mode) but backend contract + code review confirm the guard. Recommend adding a follow-up unit/render test in the frontend if the guard changes.",
+    "Admin bypass: isTeamView = role==='admin' || workspaceMode==='team' — admin serkan sees company UI in KULLANICILAR tab regardless of workspace_mode. Confirmed via UI test."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_workspace_and_company.py (NEW — 16 tests: 5 workspace_mode, 6 task owner fields, 4 admin companies, 1 final cleanup)"
+  ],
+  "success_rate": { "backend": "100% (78/78 pytest — 16 new + 62 regression)", "frontend": "100% (workspace toggle, admin company row + badge + grouping + collapse verified)" },
+  "test_credentials": "serkan / 19071987 (admin), ahmet / ahmet123 (user, active trial license)",
+  "seed_data_creation": "During tests: company 'TEST_AcmeLtd'→'TEST_NewCorp'→unset (backend), 'TEST_AcmeUI'→unset (frontend), workspace_mode team→personal (ahmet). All reverted. Final state: ahmet has NO company_name and workspace_mode='personal'. system_settings.global.quota_mb still 10240 (unchanged).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "iteration_41 introduces (i) workspace_mode toggle (personal/team) at /api/settings/workspace-mode, exposed in login+/me; (ii) task-level assignee_name+company_name (optional on Task/TaskCreate/TaskUpdate); (iii) admin company_name on user + /api/admin/companies distinct list + KULLANICILAR grouping. New testids: settings-tab-workspace, workspace-mode-personal, workspace-mode-team, task-assignee-input, task-company-input, task-owner-{id}, admin-company-{username}, admin-company-badge-{username}, admin-company-group-{key} (key='__no_company__' → suffix 'none'), admin-company-toggle-{key}, admin-add-company-select, admin-add-company-custom. When running pytest, use `-o addopts=''` to disable xdist (single-session-kick collides with parallel logins). All new tests are in /app/backend/tests/test_workspace_and_company.py.",
+  "rca_of_the_issue": "N/A — clean feature acceptance. Only test-infra learning: pytest-xdist parallel workers collide with the SESSION_KICKED single-session policy. Fixed by disabling xdist locally with `-o addopts=''`. No product bug."
+}

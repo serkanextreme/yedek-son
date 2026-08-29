@@ -1,0 +1,32 @@
+{
+  "summary": "Verified Sertex task attachments feature (chunked upload + Emergent object storage). Backend pytest: 6/6 passed — happy path (init→chunk→complete→list→download→delete), 9 MB / 3-chunk integrity via SHA-256 hash match, multiple files (3) on one task, RBAC view/upload/download 404 for non-viewer employee, RBAC delete matrix (uploader ✓ / manager ✓ / admin ✓ / non-uploader-non-manager 403), and 100 MB size cap (init returns 400). Frontend: card flow ('📎 DOSYALAR' section inside expanded task) — set_input_files → toast 'Dosya eklendi', attach-item appears with size/uploader, delete removes it with 'Dosya silindi' toast. Edit-modal flow ('Görevi Düzenle') — modal has max-h-[88vh] + overflow-y-auto (İPTAL/KAYDET stay reachable), same TaskAttachments section renders BEFORE the action buttons, upload/download/delete all work; download() correctly triggered a Playwright download with the original filename. Cleaned up leftover ui_attach.txt from prior manual test.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "EditTaskModal (dev-time)", "issues": ["Console hydration warning: '<span> cannot be a child of <option>' comes from x-source overlay spans injected into REMINDER_DAY_CHOICES <option> elements — pre-existing dev-tooling artifact, NOT caused by attachments. Ignore in production."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_task_attachments.py",
+    "/app/test_reports/pytest/task_attachments.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "tasks_router.py attachment endpoints (lines 968-1132) look correct: RBAC via _can_view_task on all read/write endpoints; delete gated by uploader OR _can_share_task; 100 MB cap enforced BOTH at init (total_size) AND streaming during chunk append (defensive belt-and-suspenders); tmp files cleaned up in finally block on complete/error. Good.",
+    "In-memory _upload_sessions dict + /tmp/sertex_task_uploads assembly is safe under the single-uvicorn-worker deployment noted in the review request — but if the app ever scales to multiple workers, uploads will break silently (sticky-session or Redis-backed session store needed). Worth a TODO comment near _upload_sessions.",
+    "Content-Disposition header quotes filename literally — filenames containing a double-quote character would break the header. Consider RFC 5987 filename*= encoding for non-ASCII, or at least strip/escape quotes. Low priority (Turkish letters work — tested unicode-safe via requests roundtrip).",
+    "TaskAttachments.jsx cleanly re-fetches list after upload/delete; download uses fetch-as-blob with Authorization header (no URL-param auth) — good security posture.",
+    "EditTaskModal max-h-[88vh] + overflow-y-auto correctly keeps İPTAL/KAYDET buttons reachable even with many attachments."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_task_attachments.py"
+  ],
+  "success_rate": { "backend": "100%", "frontend": "100%" },
+  "test_credentials": "serkan/19071987 (admin), mgr_test/mgr12345 (manager Test Company A), emp1_test/emp12345 (employee Test Company A)",
+  "seed_data_creation": "All test tasks (TEST_attach_*) and their attachments created during pytest were deleted in-test. UI test cleaned up leftover ui_attach.txt from prior manual testing on task 017ce7f1 (QA_REORDER_TOP_ACTIVE_2). No residual TEST_/ui_pytest files remain.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Attachment endpoints (all under /api/tasks/{tid}/attachments): init/chunk/complete/list/download/delete. Chunk multipart form fields: upload_id, index, chunk. Complete body: {upload_id}. RBAC: _can_view_task gates read+upload; _can_share_task OR uploader can delete. 100 MB cap. In-memory upload sessions (single worker only). Frontend testids: task-attachments-{tid}, attach-upload-btn-{tid}, attach-upload-input-{tid} (hidden file input — use set_input_files, not click), attach-item-{attId}, attach-download-{attId}, attach-download-icon-{attId}, attach-delete-{attId}, attach-empty-{tid}. Note: task-item click toggles collapse; when re-running UI tests be aware of collapsed state. Pytest runs must use -o 'addopts=' to disable the default xdist -n parallelism, otherwise SESSION_KICKED (Sertex single-session rule) invalidates the admin token while worker gw1 is running."
+}

@@ -1,0 +1,42 @@
+{
+  "summary": "Frontend E2E testing of the new CustomSnoozeInput (Gün · Saat · Dk → total minutes) shared component across REMINDER TOAST and CONTEXT MENU surfaces, plus regression checks of existing preset buttons. All 7 assertions PASSED against the preview URL as ahmet. Main agent already verified the OVERDUE MODAL surface end-to-end; this iteration completes the remaining two surfaces + validation.",
+  "features_verified": {
+    "A1_toast_custom_snooze_mins_90": "PASS — reminder-custom-{T}-mins=90 + apply → GET /api/tasks/T shows reminder_at ≈ now+90 min (diff=90.0, exact), reminder_fired=false.",
+    "A2_toast_preset_regression_5min": "PASS — reminder-snooze-5-{T} still works after custom-row addition → reminder_at ≈ now+5 min (diff=5.0).",
+    "A3_toast_validation_empty_apply": "PASS — clicking reminder-custom-{T}-apply with all 3 fields empty shows 'Gün, saat veya dakika girin' toast AND task's reminder_at is unchanged.",
+    "B1_ctx_reminder_custom_dur_saat_3": "PASS — ctx-reminder-custom-dur-hours=3 + apply (label 'Kur') → reminder_at ≈ now+180 min (diff=180.0).",
+    "B2_ctx_reminder_preset_1h_regression": "PASS — ctx-reminder-1h preset still works after ÖZEL SÜRE (SONRA) block insertion → reminder_at ≈ now+60 min (diff=60.0).",
+    "B3_ctx_reminder_ozel_zaman_regression": "PASS — ctx-reminder-custom-input + ctx-reminder-custom-set (ÖZEL ZAMAN datetime block, placed AFTER ÖZEL SÜRE) still works → reminder_at ≈ now+120 min (diff=119.7).",
+    "B4_ctx_reminder_custom_dur_validation": "PASS — ctx-reminder-custom-dur-apply with all-empty fields shows 'Gün, saat veya dakika girin' toast; reminder_at stays null."
+  },
+  "surfaces_tested": {
+    "reminder_toast": "PASS (A1+A2+A3) — CustomSnoozeInput row renders below preset snooze buttons in ReminderToastBody; total-minute formula (gün*1440+saat*60+dk) correctly forwarded to snoozeTo(now+min).",
+    "context_menu_sonra": "PASS (B1+B2+B4) — 'ÖZEL SÜRE (SONRA)' block with label='Kur' correctly triggers onAction('reminder-custom-duration',{offset}) which TaskCard.handleAction routes via the reminder-* branch (offset used).",
+    "context_menu_ozel_zaman": "PASS (B3) — pre-existing datetime block still functional; block ordering (ÖZEL SÜRE first, then ÖZEL ZAMAN) matches spec.",
+    "overdue_modal": "Skipped (main agent already verified end-to-end per problem statement)."
+  },
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "CustomSnoozeInput.jsx: onClick={stop} on number inputs correctly prevents context-menu close on focus/blur inside the reminder submenu — clean pattern.",
+    "reminderUtils.formatDurationTr(165) → '2 saat 45 dk' verified indirectly by toast confirmation messages; edge case formatDurationTr(0) returns '0 dk' which is safe since apply() guards against total<=0.",
+    "TaskCard.handleAction reminder-custom-duration correctly falls into the else branch (action.startsWith('reminder-')) and uses extra.offset — no special-case needed; the branch works for both preset offsets and the new custom-duration action.",
+    "OverdueAlertModal.snoozeAll bulk custom row appears only when overdueTasks.length > 1 (line 281) — matches spec exactly.",
+    "Validation logic centralized in CustomSnoozeInput.apply — single source of truth for the 'Gün, saat veya dakika girin' error toast; both toast and ctx surfaces share the same error message (verified textual match in A3 and B4).",
+    "Minor: CustomSnoozeInput does not disable the apply button while all fields are 0 — the click still fires and shows the error toast. Acceptable but a disabled state would be a nicer UX (small enhancement, not a bug)."
+  ],
+  "updated_files": [],
+  "success_rate": { "backend": "N/A (skipped per request)", "frontend": "100% (7/7 assertions)" },
+  "test_credentials": "ahmet / ahmet123 (employee with active trial license).",
+  "seed_data_creation": "Created TEST_toast_A and TEST_ctx_B for the two surfaces; both deleted at end of run. Also pre-cleaned 15 stale TEST_/PYTEST_ tasks left over from previous iterations.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "CustomSnoozeInput data-testids follow the pattern `${testPrefix}-days|-hours|-mins|-apply|-row`. Surfaces use testPrefix: overdue-custom-{id}, overdue-custom-all, reminder-custom-{id}, ctx-reminder-custom-dur. IMPORTANT: reminder toast will NOT fire on demand — TasksPanel polls every 20s and ReminderWatcher every 30s. To trigger the toast in a Playwright test WITHOUT waiting 20-30s, dispatch window.CustomEvent('sertex:reminder-action') which forces TasksPanel to reload and re-run the reminder scheduler check. This was the key insight that made the toast tests reliable.",
+  "rca of the issue": "N/A — no issues found. Feature works end-to-end on all 3 surfaces (overdue modal already verified by main agent; toast + context menu verified this iteration)."
+}

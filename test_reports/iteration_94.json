@@ -1,0 +1,24 @@
+{
+  "summary": "Full end-to-end verification of the new 'Sıra numarasını sabitle' (Pin sequence number) feature for both TASKS and SUBTASKS. All 10 sub-scenarios passed on live UI + backend: (1) AUTO pin on task via ctx-pin-number → ctx-pin-number-auto shows 'OTOMATİK (MEVCUT: 13)', anchor icon appears at task-number-pinned-{id}, backend persists number_pinned=true/pinned_number=13; (2) Duplicate manual pin blocked with error toast 'zaten … sabit' and the pin is NOT applied; (3) Manual pin to a different number (1) works, anchor shown, displayed number = target, and QA_PIN_C dynamically shows 12 (skips the reserved 1); (4) After page reload both pinned anchors persist; (5) Subtask AUTO pin works (sub-ctx-pin-number-auto 'OTOMATİK (MEVCUT: 1)') → subtask-number-pinned-{tid}-0 appears; (6) Subtask duplicate pin blocked; (7) Subtask anchor persists after reload; (8) Task unpin (ctx-unpin-number) removes anchor and clears backend fields; (9) Subtask unpin removes anchor & clears backend; (10) Drag reorder of another task around the pinned task keeps the pinned task's displayed number and anchor unchanged (TB stayed at '1.' with anchor). Backend regression pytest (test_pin_number.py) also passes (2/2).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_pin_number.py",
+    "/app/test_reports/pytest/pin_number_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "TaskContextMenu.jsx: OK - submenu opens on click via setNumberSub(true); OTOMATİK button only rendered when displayNumber != null (correctly hides for done tasks).",
+    "Duplicate-prevention logic reads current tasks and validates non-done pinned numbers — worked reliably for both task and subtask flows.",
+    "Reserve-skip numById logic verified in default 'BENIM GÖREVLERIM' view: pinned task TB=1 caused TC to skip and become 12 while all other unpinned tasks kept sequential ordering.",
+    "Minor: submenu 'MEVCUT: N' shows current display index (task number 13 including task's position). Feels correct."
+  ],
+  "updated_files": ["/app/backend/tests/test_pin_number.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "serkan / 19071987 (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "Created ephemeral QA_PIN_A (with 3 subtasks), QA_PIN_B, QA_PIN_C via API through the browser session; all deleted at end. Final sweep confirmed no residual QA_PIN_* tasks.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Task ⋮ button is [data-testid=task-menu-{id}] (opens TaskContextMenu). Subtask ⋮ button is [data-testid=subtask-menu-{taskId}-{idx}]. The pin submenu is a click-toggled subview inside the same menu (NOT a hover-triggered submenu) — you must CLICK [data-testid=ctx-pin-number] (or sub-ctx-pin-number) to reveal ctx-pin-number-auto / ctx-pin-number-input / ctx-pin-number-set / ctx-unpin-number. When authenticated in-page tasks-scope may differ from raw JWT scope; using page.evaluate with localStorage 'sertex_token_v1' aligns with the UI's view. Backend persistence fields: task.number_pinned (bool), task.pinned_number (int|null); subtask.number_pinned, subtask.pinned_number. PATCH /api/tasks/{id} accepts these directly for tasks; subtasks require PATCH of the full subtasks array.",
+  "rca of the issue": "N/A — feature verification. No bugs found. Feature works exactly as specified: AUTO+MANUAL, both tasks + subtasks, reserve-skip dynamic numbering, duplicate prevention with toast, drag-reorder keeps pinned number, unpin restores dynamic numbering, all persist across reload."
+}

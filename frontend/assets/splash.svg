@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2732 2732">
+  <defs>
+    <radialGradient id="g" cx="1366" cy="1366" r="1600" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0e2440"/>
+      <stop offset="1" stop-color="#040b16"/>
+    </radialGradient>
+    <linearGradient id="hex" x1="0" y1="0" x2="2732" y2="2732" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#38f0ff"/>
+      <stop offset="1" stop-color="#0aa9c0"/>
+    </linearGradient>
+  </defs>
+  <rect width="2732" height="2732" fill="url(#g)"/>
+  <g transform="translate(1366,1366)">
+    <polygon points="0,-400 346,-200 346,200 0,400 -346,200 -346,-200" fill="none" stroke="url(#hex)" stroke-width="16" opacity="0.9"/>
+    <polygon points="0,-260 225,-130 225,130 0,260 -225,130 -225,-130" fill="none" stroke="url(#hex)" stroke-width="6" opacity="0.5"/>
+    <circle r="60" fill="#38f0ff"/>
+  </g>
+  <text x="1366" y="1930" font-family="Courier New, monospace" font-size="130" font-weight="900" fill="#38f0ff" text-anchor="middle" letter-spacing="20">SERTEX</text>
+  <text x="1366" y="2010" font-family="Courier New, monospace" font-size="34" fill="#38f0ff" text-anchor="middle" opacity="0.55" letter-spacing="8">KİŞİSEL YAPAY ZEKA</text>
+</svg>

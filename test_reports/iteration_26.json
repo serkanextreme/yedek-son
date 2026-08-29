@@ -1,0 +1,37 @@
+{
+  "summary": "Frontend-only test for the new inline wake-word toggle placed next to the mic button. All 5 required scenarios PASS: element exists + visible, click-enable turns BOTH toggles emerald and writes {\"enabled\":true} to localStorage sertex_wake_settings_v1 (with the 'Uyandırma kelimesi aktif' toast), click-disable on the OTHER toggle returns BOTH to the muted disabled state and writes {\"enabled\":false}, and no console errors were raised during the full flow.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_details": {
+    "wake-toggle-inline_visible": true,
+    "mic-button_present": true,
+    "wake-word-toggle_HUD_present": true,
+    "initial_localStorage": null,
+    "localStorage_after_inline_enable": "{\"enabled\":true}",
+    "inline_class_after_enable_contains_emerald": true,
+    "hud_class_after_enable_contains_emerald": true,
+    "toast_after_enable": "Uyandırma kelimesi aktif — 'Sertex' de yeter",
+    "localStorage_after_hud_disable": "{\"enabled\":false}",
+    "both_toggles_returned_to_disabled_state": true,
+    "console_errors_count": 0
+  },
+  "regression_notes": "DUR (stop-tts) button and alarm-tab were not found by generic selectors during idle state — these controls appear conditionally (DUR only while TTS is speaking, alarm tab is inside the right-side NEURAL LINK tab strip). No regression observed. Voice-auto-hint and wake-triggered event flow were validated end-to-end in iteration_25 and the underlying handleToggleWake helper is unchanged behaviorally — the inline toggle simply calls the same function.",
+  "critical_code_review_comments": [
+    "Both toggles share a single handleToggleWake handler in SertexMain.jsx (lines 187, 405, 507). Clean, DRY implementation — no state duplication risk.",
+    "Inline toggle uses identical class-state logic as HUD toggle (disabled=border-sertex-cyan/25 muted, enabled=border-yellow-400/50, enabled+active=border-emerald-400 with animate-pulse). Visual consistency is good.",
+    "Minor: onToggleWake prop is optional-guarded in InputBar (`{onToggleWake && (...)}`) — parent must pass it for the chip to render. Currently wired correctly by SertexMain."
+  ],
+  "test_report_links": [],
+  "action_items": [],
+  "updated_files": [],
+  "success_rate": {"frontend": "100%"},
+  "test_credentials": "serkan / 19071987 (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Two wake-word toggles now exist: [data-testid=wake-toggle-inline] in InputBar (next to mic-button, has AUTO label hidden on <md) and [data-testid=wake-word-toggle] in HUDOverlay top-left. Both are wired to the same handleToggleWake helper in SertexMain.jsx, so clicking either updates localStorage sertex_wake_settings_v1 and reflects state on BOTH. Toast strings: 'Uyandırma kelimesi aktif — Sertex de yeter' on enable, 'Uyandırma kelimesi kapatıldı' on disable."
+}

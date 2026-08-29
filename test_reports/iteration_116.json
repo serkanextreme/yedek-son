@@ -1,0 +1,37 @@
+{
+  "summary": "SERTEX Mobile FAZ B2 Wave 4 CROSS-ROLE OTP unlock flow verified end-to-end on Expo web preview (mobile viewport 414x896) using TWO independent browser contexts (Session A: serkan/admin, Session B: ahmet/employee owner). All three requested behaviors PASS: (A) on task b0a0c76b-ef68-4a03-9b3f-4c6b6d16a4f6, non-owner admin sees [task-detail-lock-section] chip 'Kilitli' + active-lock chips + [task-detail-lock-issue-otp] visible; tapping it opens the OTP modal and [task-detail-otp-code] shows a 6-digit code (captured '196140'). (B) On the same task, owner ahmet sees chip 'Kilitli', [task-detail-lock-issue-otp] is HIDDEN, [task-detail-lock-unlock-open] is visible; tapping it reveals [task-detail-unlock-input]; typing the captured code and pressing [task-detail-unlock-submit] flips the chip to 'Kilit açık' and the note updates to 'Tek kullanımlık pencere aktif — bir kısıtlı işlem yapabilirsiniz.'. (C) Negative check: entering a wrong 6-digit code (000000) BEFORE the correct one returns backend 400 and the section stays 'Kilitli' (unlock window NOT opened) — error surfaced in the modal. No red screens, no 401s, no crashes. Only pre-existing warning: 'props.pointerEvents is deprecated' from react-native-web (inherited, not from Wave 4).",
+  "platforms_tested": ["mobile"],
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "mobile": {
+      "ui_bugs": [],
+      "integration_issues": [],
+      "design_issues": [],
+      "react_native_issues": [
+        {"component": "react-native-web pointerEvents (pre-existing)", "issue": "Console warning 'props.pointerEvents is deprecated. Use style.pointerEvents' — inherited from earlier iterations, unrelated to Wave 4."}
+      ]
+    }
+  },
+  "parity_issues": [],
+  "test_report_links": [
+    "/app/test_reports/iter116_A_before.jpeg",
+    "/app/test_reports/iter116_B_before.jpeg",
+    "/app/test_reports/iter116_A_otp.jpeg",
+    "/app/test_reports/iter116_B_wrong.jpeg",
+    "/app/test_reports/iter116_B_after.jpeg"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "LockSection.tsx role gating is correct: isOwner=(currentUserId===task.user_id) hides [task-detail-lock-issue-otp] for owner (line 512) and shows [task-detail-lock-unlock-open] for owner when requires_otp=true (line 531-540). Verified live with ahmet on ahmet-owned task.",
+    "OtpDisplayModal renders code via <Text testID={DETAIL.otpCode} selectable> (LockSection.tsx:288) — extraction via el.innerText worked reliably.",
+    "UnlockOtpModal calls api.verifyUnlockOtp; on ApiError surfaces e.message which contains backend Turkish string 'Şifre geçersiz veya kullanılmış' — verified on wrong-code path (backend returned 400)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (frontend-only per request)", "frontend": "100% — all 3 cross-role behaviors verified"},
+  "test_credentials": "Session A: serkan/19071987 (admin issuer). Session B: ahmet/ahmet123 (employee owner). Two separate browser contexts used.",
+  "seed_data_creation": "None. Used pre-seeded task b0a0c76b-ef68-4a03-9b3f-4c6b6d16a4f6 ('OTP-XROLE-TEST'). Post-test state: unlock window is now OPEN for ahmet — if you need to re-run negative-then-positive, either reset lock_flags via API or issue a fresh OTP (issuer button invalidates prior code).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Wave 4 cross-role OTP is production-ready on mobile. Key technique used: browser.new_context() twice to get parallel sessions without SESSION_KICKED (different users, so single-session rule doesn't apply). Ahmet-owned task detail loads on direct deep link. For clicking Pressables inside modals, page.eval_on_selector(sel, 'el => el.click()') works reliably. TextInput [task-detail-unlock-input] is a native React Native TextInput — page.keyboard.type() after focus is more reliable than page.fill() for triggering onChangeText numeric filter.",
+  "rca of the issue": "No bugs found. Behavior matches spec exactly: role gating, OTP issuance, verification success, invalid-code rejection, and status chip/notes update all work correctly."
+}

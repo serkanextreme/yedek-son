@@ -1,0 +1,43 @@
+{
+  "summary": "Bug fix verification (web only) — TasksPanel Arşiv search now ignores the sidebar iş-kolu (category) filter. Reproduced original bug scenario and all specified regression scenarios; all PASS.",
+  "platforms_tested": ["web"],
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "web": {
+      "ui_bugs": [],
+      "integration_issues": [],
+      "design_issues": []
+    }
+  },
+  "parity_issues": [],
+  "test_report_links": [
+    "/app/test_reports/seed_archive_bug.py",
+    "/app/test_reports/seed_archive_bug.json",
+    "/app/test_reports/iter123_repro_kolsuz.jpeg",
+    "/app/test_reports/iter123_repro_othercat.jpeg",
+    "/app/test_reports/iter123_regression_tumu.jpeg",
+    "/app/test_reports/iter123_archive_groups.jpeg"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "/app/frontend/src/components/TasksPanel.jsx is 2739 lines — well over the 700-line guideline. Consider splitting into sub-components (ArchivePane, CategoryFilterBar, TaskList, etc.). Not blocking this bug fix, but a maintainability risk.",
+    "The `filtered` computation (line ~1499) and the two render-branch conditions (line 1657 and 2481) all repeat the same predicate `(showArchived || (filters.length === 0 && !categoryFilter))`. Extract into a memoized flag (e.g. `const useSortedDirectly = ...`) to keep them in sync — this bug was caused by these three code paths drifting."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a", "frontend": "100%"},
+  "test_credentials": "serkan / 19071987 (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "Created + archived task 'TESTARCH_BUG122_1787304284' (category=Fason Verme) via /app/test_reports/seed_archive_bug.py. Cleaned up at end via DELETE /api/tasks/{id}/permanent (200 → {deleted:1}). No residual test data.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Bug122 archive-search-vs-category-filter confirmed FIXED on web. All three archive-search scenarios (category NOT containing the task = KOLSUZ chip; TÜMÜ; own-category Fason Verme) show '1 SONUÇ BULUNDU' + rendered task card + no [data-testid=archive-empty-state]. Archive group chips (archive-group-done|cancelled|deleted) and sort chips (archive-sort-new|old|az) all clickable. Non-archive category filter still narrows active list (Fason Verme chip in active view does not show the archived task).",
+  "rca of the issue": "Root cause (as noted by main agent) was that TasksPanel.jsx's `filtered` computation applied both `filters` (status chips) and `categoryFilter` (sidebar iş-kolu chip) unconditionally, even though those chip UIs are hidden when `showArchived` is true. Since categoryFilter state persisted from before entering the archive, archive search inherited that filter and could not find tasks in other categories. Fix (verified in code at lines 1499–1518, 1657, 2481) gates BOTH filters on `!showArchived` — so archive uses only its own group + sort + search. Verified E2E via seeded archived task and 3 sidebar-category chip combinations.",
+  "test_scenarios_executed": [
+    {"scenario": "REPRO — KOLSUZ chip (category-chip-none) selected → open ARŞİV → search 'TESTARCH_BUG122'", "result": "PASS — count='1 SONUÇ BULUNDU', archive-empty-state=false, task card rendered"},
+    {"scenario": "REPRO alt — category-chip-Fason Verme selected (but task has that same category — still valid archive search)", "result": "PASS — count='1 SONUÇ BULUNDU'"},
+    {"scenario": "REGRESSION — TÜMÜ (category-chip-all) → ARŞİV → search", "result": "PASS — count='1 SONUÇ BULUNDU'"},
+    {"scenario": "REGRESSION — own-category (Fason Verme) → ARŞİV → search", "result": "PASS — count='1 SONUÇ BULUNDU'"},
+    {"scenario": "Archive group chips exist and clickable (done/cancelled/deleted)", "result": "PASS — all three testIDs present and toggled successfully"},
+    {"scenario": "Archive sort chips exist and clickable (new/old/az)", "result": "PASS — all three testIDs present and toggled successfully"},
+    {"scenario": "Non-archive category filter still works (active list narrowed to Fason Verme)", "result": "PASS — archived task not shown in active view under Fason Verme chip"}
+  ]
+}

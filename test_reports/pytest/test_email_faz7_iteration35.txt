@@ -1,0 +1,51 @@
+bringing up nodes...
+bringing up nodes...
+
+....EEEE...                                                              [100%]
+==================================== ERRORS ====================================
+_ ERROR at setup of TestAuthAndLicenseGuards.test_unlicensed_user_gets_402_on_accounts _
+[gw0] linux -- Python 3.11.15 /root/.venv/bin/python
+backend/tests/test_email_faz7.py:82: in unlicensed_user
+    u = _admin_create_user(admin_token, uname, pwd, with_license=None)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/tests/test_email_faz7.py:43: in _admin_create_user
+    assert r.status_code in (200, 201), f"create user failed: {r.status_code} {r.text}"
+E   AssertionError: create user failed: 401 {"detail":"SESSION_KICKED: Başka bir cihazdan giriş yapıldı — bu oturum sonlandırıldı"}
+E   assert 401 in (200, 201)
+E    +  where 401 = <Response [401]>.status_code
+_ ERROR at setup of TestAuthAndLicenseGuards.test_unlicensed_user_gets_402_on_add _
+[gw0] linux -- Python 3.11.15 /root/.venv/bin/python
+backend/tests/test_email_faz7.py:82: in unlicensed_user
+    u = _admin_create_user(admin_token, uname, pwd, with_license=None)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/tests/test_email_faz7.py:43: in _admin_create_user
+    assert r.status_code in (200, 201), f"create user failed: {r.status_code} {r.text}"
+E   AssertionError: create user failed: 401 {"detail":"SESSION_KICKED: Başka bir cihazdan giriş yapıldı — bu oturum sonlandırıldı"}
+E   assert 401 in (200, 201)
+E    +  where 401 = <Response [401]>.status_code
+_ ERROR at setup of TestAddAccountRollback.test_fake_creds_returns_400_and_no_persistence _
+[gw0] linux -- Python 3.11.15 /root/.venv/bin/python
+backend/tests/test_email_faz7.py:70: in licensed_user
+    u = _admin_create_user(admin_token, uname, pwd, with_license="trial")
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/tests/test_email_faz7.py:43: in _admin_create_user
+    assert r.status_code in (200, 201), f"create user failed: {r.status_code} {r.text}"
+E   AssertionError: create user failed: 401 {"detail":"SESSION_KICKED: Başka bir cihazdan giriş yapıldı — bu oturum sonlandırıldı"}
+E   assert 401 in (200, 201)
+E    +  where 401 = <Response [401]>.status_code
+_ ERROR at setup of TestAddAccountRollback.test_invalid_email_format_400_turkish _
+[gw0] linux -- Python 3.11.15 /root/.venv/bin/python
+backend/tests/test_email_faz7.py:70: in licensed_user
+    u = _admin_create_user(admin_token, uname, pwd, with_license="trial")
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/tests/test_email_faz7.py:43: in _admin_create_user
+    assert r.status_code in (200, 201), f"create user failed: {r.status_code} {r.text}"
+E   AssertionError: create user failed: 401 {"detail":"SESSION_KICKED: Başka bir cihazdan giriş yapıldı — bu oturum sonlandırıldı"}
+E   assert 401 in (200, 201)
+E    +  where 401 = <Response [401]>.status_code
+=========================== short test summary info ============================
+ERROR backend/tests/test_email_faz7.py::TestAuthAndLicenseGuards::test_unlicensed_user_gets_402_on_accounts
+ERROR backend/tests/test_email_faz7.py::TestAuthAndLicenseGuards::test_unlicensed_user_gets_402_on_add
+ERROR backend/tests/test_email_faz7.py::TestAddAccountRollback::test_fake_creds_returns_400_and_no_persistence
+ERROR backend/tests/test_email_faz7.py::TestAddAccountRollback::test_invalid_email_format_400_turkish
+7 passed, 4 errors in 2.20s

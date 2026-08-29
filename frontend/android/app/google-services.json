@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "768401987536",
+    "project_id": "sertex-10c1f",
+    "storage_bucket": "sertex-10c1f.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:768401987536:android:b89f63e03c4914ae03cbd5",
+        "android_client_info": {
+          "package_name": "com.sertex.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBX-qVclmOuaRDRdeAj6hQH81vlLVUFdYE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

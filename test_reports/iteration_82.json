@@ -1,0 +1,30 @@
+{
+  "summary": "Task Grouping (Görev Bağlama) feature tested end-to-end. Backend: 7/7 pytest tests pass covering create (with min-2 validation), list, patch (name/progress/membership replace + reorder + removed-member clearing + sort_order descending), remove-member (with auto-dissolve when <2 remain), and delete-group. Frontend: full UI flow verified — toolbar BAĞLA opens modal, adding >=2 tasks + name + progress toggle + Save creates group block with header, progress badge '0/2 tamamlandı', drag handle, edit button, dissolve button; right-click on ungrouped task shows 'Görevleri Bağla' and preselects that task; right-click on grouped task shows both 'Grubu Düzenle' and 'Gruptan Çıkar'; toggling a member's status updates progress badge to '1/2 tamamlandı'; edit modal is prefilled with the group name; dissolve button dissolves the group ('Grup bağlantısı çözüldü' toast) and tasks return as normal cards. No regressions observed on task list rendering, status toggle, task creation, or archive.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_task_groups.py",
+    "/app/test_reports/pytest/task_groups.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "TasksPanel.jsx is very large (~3604 lines). Consider extracting TaskGroupBlock, OuterTaskRow, and the add-task form into separate files for maintainability.",
+    "dissolveGroup() has no user confirmation — a single accidental click on the small unlink icon irreversibly dissolves the group. Consider a lightweight confirm() (e.g. 'Grubu çözmek istediğinize emin misiniz?') to match user's regression-averse UX ('hiçbir şeyi bozma').",
+    "In backend create_task_group, sort_order uses hardcoded 1e6 base (float(1000000 - idx)); if user already had tasks with sort_order > 1000000 elsewhere the group members may appear below them. Consider anchoring to max(existing sort_order)+N or a per-group logical order field."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_task_groups.py (new)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "Test user: ahmet / ahmet123 (login-username, login-password, login-submit) — sourced from review_request. /app/memory/test_credentials.md not consulted (auth flows not the focus).",
+  "seed_data_creation": "Backend tests create 4 TEST_group_task_* tasks per module and delete them in fixture teardown. UI tests created 2 TEST_LNK_A_* and TEST_LNK_B_* tasks and archived them at end (visible via 'Görev arşivlendi' toast). Any stale TEST_ tasks/groups from earlier runs may still exist under ahmet's account.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Feature is stable. Test file at /app/backend/tests/test_task_groups.py provides regression coverage for all 5 group endpoints. Frontend testids to use: link-tasks-toolbar-btn, link-tasks-modal, link-group-name, link-show-progress, link-add-{id}, link-save, link-selected-{id}, link-modal-backdrop, task-group-{gid}, group-progress-{gid}, group-edit-{gid}, group-dissolve-{gid}, group-drag-{gid}, task-item-{id}, task-check-{id}, task-context-menu. Overdue modal appears on login — close via [data-testid=overdue-alert-close] before interacting. Drag reorder (whole-group + intra-group) was NOT simulated in headless Playwright due to Framer-Motion Reorder complexity; backend sort_order persistence is validated by the patch test (verifies contiguous descending order after PATCH task_ids reorder).",
+  "rca of the issue": "N/A — no bugs found."
+}

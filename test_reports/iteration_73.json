@@ -1,0 +1,33 @@
+{
+  "summary": "Frontend-only retest of CP8.5 CompanyCombobox suppressOpenOnFocus fix. All requested scenarios PASS. The dropdown now STAYS CLOSED after clicking an option (both mouse-click and keyboard-Enter paths), and a subsequent click on the input correctly REOPENS the dropdown. Dark theme, no native datalist, free-text typing, and EditTaskModal <select data-testid='edit-company'> regression are all intact.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "verified_scenarios": {
+    "click_option_closes_dropdown": "PASS — after clicking option 'CoDS_17c701', [data-testid='task-company-combobox-list'] was ABSENT from DOM at 150ms AND at 650ms post-click. Input value updated to 'CoDS_17c701'.",
+    "subsequent_click_reopens": "PASS — clicking the input again after commit reopened the list (suppressOpenOnFocus flag correctly resets after one use).",
+    "escape_closes": "PASS — Escape key removes the list from the DOM.",
+    "keyboard_flow_arrowdown_enter": "PASS — after clearing input, click reopened list; ArrowDown + Enter committed 'CoDS_31b538' and list closed immediately (Enter path uses commitOption too).",
+    "free_text_typing": "PASS — typing 'TESTFREE_XYZ' updates the input value normally; list stays open while typing.",
+    "dark_theme": "PASS — reopened list has bg=rgba(5,9,20,0.95) border=rgba(0,240,255,0.4) — sertex-cyan/40. Matches iteration_72 values.",
+    "no_native_datalist": "PASS — datalist#task-company-datalist not present in DOM.",
+    "edit_task_modal_regression": "PASS — opening 'Düzenle' on an existing task renders <select data-testid='edit-company'>. Tag verified via DOM: SELECT."
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "CompanyCombobox.jsx suppressOpenOnFocus fix is minimal and correct: onFocus consumes the flag exactly once, so programmatic focus() after commitOption does not reopen the list, but real user focus/click continues to open it.",
+    "Unrelated pre-existing console warning observed on Tasks tab: React hydration warning about a <span> child inside <option> in the assignee <select> at TasksPanel.jsx:2291 (dev-tools instrumentation injects display:contents span into <option>). This is NOT caused by CP8.5; harmless in prod build but worth cleaning up eventually."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a", "frontend": "100% (8/8 scenarios PASS)"},
+  "test_credentials": "serkan / 19071987 (admin)",
+  "seed_data_creation": "None — no tasks created this run.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "CP8.5 CompanyCombobox is fully resolved as of this iteration. Both original white-datalist bug (iter 72) and dropdown-reopens-after-click UX polish (iter 73) are verified fixed. EditTaskModal untouched and confirmed still using native <select data-testid='edit-company'>.",
+  "rca of the issue": "commitOption() calls inputRef.focus() to preserve keyboard flow after mouse selection. The input's onFocus handler unconditionally setOpen(true), causing the just-closed dropdown to reopen immediately. Fix introduces a useRef flag `suppressOpenOnFocus` that commitOption sets to true right before calling focus(); onFocus checks-and-clears the flag before deciding to open, so exactly one focus event is suppressed. Subsequent focuses (user clicks or Tab) open normally."
+}

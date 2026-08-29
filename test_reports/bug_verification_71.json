@@ -1,0 +1,39 @@
+{
+  "verdict": "fixed",
+  "user_reported_bug": "bak bu sekilde-tümü secenegin deyken aktif veya gecti tıklı olunca sıraya dizme calısmıyor",
+  "summary": "No relevant testing skill found. Focused frontend/UI + API verification passed: logged in as serkan, opened Görevler, verified TÜMÜ+AKTİF drag reorder persists after reload, verified category-only QA_REORDER_CAT_A now hides non-category tasks and persists filtered reorder, verified AKTİF+category filtered reorder preserves hidden task master positions, and verified no-filter baseline reorder persists. All APIs were real; no MOCKED APIs used.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/tests/task_reorder_seed.py",
+    "/app/tests/task_reorder_ui_verification_71.py",
+    "/app/tests/task_reorder_seed_output.json"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "TasksPanel.jsx render branch now uses `filters.length === 0 && !categoryFilter`, so category-only chips enter the filtered Reorder.Group path instead of rendering the full sorted list.",
+    "Runtime reorder requests used real POST /api/tasks/reorder payloads with the full 45-id master list, preserving non-visible task positions in filtered flows."
+  ],
+  "updated_files": [
+    "/app/tests/task_reorder_ui_verification_71.py",
+    "/app/tests/task_reorder_seed_output.json",
+    "/app/test_reports/bug_verification_71.json",
+    "/app/test_reports/iteration_71.json"
+  ],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "100%"
+  },
+  "seed_data_creation": "Reseeded QA_REORDER_CAT_A category and 9 QA_REORDER_* tasks for serkan using /app/tests/task_reorder_seed.py against the real API/Mongo preview DB.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Use serkan/19071987. Seed data exists. Real UI evidence: TÜMÜ+AKTİF moved TOP_ACTIVE_2 before TOP_ACTIVE_1 and persisted; category-only chip QA_REORDER_CAT_A hid TOP_OTHER_ACTIVE and MIX_ACTIVE_NULL_2, moved TOP_ACTIVE_3 before TOP_OVERDUE_1, persisted, and hidden rows kept payload indices; AKTİF+category moved TOP_ACTIVE_1 before TOP_ACTIVE_2 and persisted; no-filter baseline moved TOP_ACTIVE_3 above TOP_ACTIVE_2 and persisted in UI/API.",
+  "rca_of_the_issue": "Previous regression was the no-status render branch ignoring categoryFilter. The fixed condition routes any active categoryFilter through `filtered` + handleReorderFiltered, resolving category-only filtering while preserving the original TÜMÜ+status reorder fix. No APIs were MOCKED."
+}

@@ -1,0 +1,40 @@
+{
+  "summary": "Verified both promoted-child bugs. Bug 1 (parent-rename cascades to child's promoted_from_task_title) confirmed via pytest hitting live backend: parent rename -> child GET returns new title. Bug 2 (status-dot color reflects real overdue-aware bucket) fully verified in UI: created a parent + 4 promoted children (active/overdue/done/paused) and asserted the dot class + Turkish tooltip for each in the parent's 'BU GÖREVDEN ÇIKANLAR' section. All 4 dots match spec.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "PATCH /api/tasks/{tid} (subtasks)", "issue": "When client sends subtasks WITHOUT explicit `id`, the persisted subtasks lose their id in Mongo (Pydantic default_factory value is stripped via exclude_unset). Every subsequent read regenerates a fresh random id, breaking any client that cached the previously-returned sub id (e.g. calling POST /api/tasks/{tid}/subtasks/{sub_id}/promote with that id returns 404 'Alt görev bulunamadı'). Real UI works because it re-fetches then uses the freshly-generated id, but this is fragile. Recommend either (a) using `exclude_none` instead of `exclude_unset` for the subtasks field, or (b) explicitly filling missing ids server-side before update."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_promoted_children_bugs.py",
+    "/app/test_reports/parent_dots.png",
+    "/app/test_reports/child_badge_after_rename.png"
+  ],
+  "action_items": [
+    "(Optional) Harden PATCH /api/tasks subtasks id persistence — see backend minor issue."
+  ],
+  "critical_code_review_comments": [
+    "TaskCard.jsx 754-767: __bucket fallback logic is correct and mirrors TasksPanel.promotedChildrenMap. Colors and Turkish tooltips (Aktif/Süresi geçti/Tamamlandı/Beklemede) all wired via data-testid=task-child-dot-{id}. Nothing to change.",
+    "tasks_router.py 589-595: title cascade uses update_many on {promoted_from_task_id: tid} — correct and verified end-to-end.",
+    "Minor: routers/tasks_models.py Subtask.id uses default_factory but PATCH path uses exclude_unset, so ids are dropped when persisted — see minor backend issue above."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_promoted_children_bugs.py (new test)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "serkan / 19071987 (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "Test tasks TEST_UI_parent_* and TEST_promote_parent_* were created and cleaned up (33 residual TEST_* tasks purged at end via direct Mongo cleanup).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Bug fixes for parent-rename cascade + child status-dot bucket are verified end-to-end. UI panel opens via [data-testid=tab-tasks]. TaskCard testid pattern is task-item-{id} (NOT task-card-{id}). Promoted-child section uses task-children-{parentId}, rows task-child-{childId}, dot task-child-dot-{childId}, dot titles: Aktif / Süresi geçti / Tamamlandı / Beklemede. Child parent-badge testid is task-promoted-jump-{childId}. Search box in Tasks panel filters by title. Backend token TTL is fine for a normal test but note login again if a run runs longer than ~90s between token capture and use.",
+  "rca of the issue": {
+    "bug1_parent_rename_cascade": "Verified fix at tasks_router.py PATCH /api/tasks/{tid} lines 589-595: when 'title' in update and value differs, executes update_many({promoted_from_task_id: tid}, {$set: {promoted_from_task_title: new_title}}). pytest test_parent_rename_cascades_promoted_from_task_title passes.",
+    "bug2_child_status_dot": "Verified fix at TaskCard.jsx lines 754-767: uses c.__bucket (fed by TasksPanel.promotedChildrenMap useMemo lines 1058-1073 which computes isOverdue -> 'gecti', status==='done' -> 'bitti', 'paused' -> 'bekliyor', else 'aktif'). Live UI: 4 promoted children rendered with expected dots: cyan (aktif), rose (gecti/overdue), emerald (bitti), amber (bekliyor)."
+  }
+}

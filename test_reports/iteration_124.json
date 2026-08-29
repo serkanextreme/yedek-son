@@ -1,0 +1,74 @@
+{
+  "summary": "End-to-end verification of Sertex Süper Yönetici / Kurucu (owner) role hierarchy across BACKEND (pytest 12/12), WEB (serkan super + acme_admin scoping), and MOBILE (Expo web preview: serkan super + acme_admin scoping). Owner protection, super-only endpoints, company scoping, admin caps (can_view_company_tasks / can_create_company / extra_company_ids), and temp super promote/revoke by owner are all working. Non-owner temp super correctly BLOCKED from promoting others. Web and mobile parity verified for Super Admin panel and scoped Settings visibility.",
+  "platforms_tested": ["web", "mobile"],
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "web": {
+      "ui_bugs": [],
+      "integration_issues": [],
+      "design_issues": [
+        {"screen": "Settings → Süper Yönetici → EK ŞİRKET GÖRME", "issues": ["Chip cloud shows ~60+ leftover test companies (COD$_*, CAPCO-*, E2E_*, RBACX_*, RBACTEST_*, TEST_COA_*, TEST_COB_*, TEMPLOGIN, TESTCO_BUG). Cosmetic, per test brief the DB has many leftover fixtures — flag for a one-off DB cleanup script; not blocking."]}
+      ]
+    },
+    "mobile": {
+      "ui_bugs": [],
+      "integration_issues": [],
+      "design_issues": [],
+      "react_native_issues": []
+    }
+  },
+  "parity_issues": [],
+  "test_report_links": [
+    "/app/backend/tests/test_super_admin_hierarchy.py",
+    "/app/backend/tests/test_super_admin_extended.py",
+    "/app/test_reports/pytest/iter124_super_admin.xml",
+    "/app/test_reports/pytest/iter124_super_admin_ext.xml",
+    "/app/test_reports/iter124_web_serkan_settings.jpeg",
+    "/app/test_reports/iter124_web_super_panel.jpeg",
+    "/app/test_reports/iter124_web_acme_settings.jpeg",
+    "/app/test_reports/iter124_mobile_serkan_home.jpeg",
+    "/app/test_reports/iter124_mobile_profile.jpeg",
+    "/app/test_reports/iter124_mobile_ayarlar.jpeg",
+    "/app/test_reports/iter124_mobile_super_screen.jpeg",
+    "/app/test_reports/iter124_mobile_acme_profile.jpeg",
+    "/app/test_reports/iter124_mobile_acme_ayarlar.jpeg"
+  ],
+  "action_items": [
+    "OPTIONAL / non-blocking: schedule a DB janitor to purge legacy fixture companies (COD$_*, CAPCO-*, E2E_*, RBACX_*, RBACTEST_*, TEST_COA_*, TEST_COB_*) — currently pollute the 'EK ŞİRKET GÖRME' chip list in Super Admin panel."
+  ],
+  "critical_code_review_comments": [
+    "test_super_admin_hierarchy.py + new test_super_admin_extended.py together give 12 passing tests. Consider merging or splitting file boundaries as the hierarchy feature grows; both files are <200 lines so still healthy.",
+    "GET /api/admin/super-admins returns {\"super_admins\": [...]} envelope rather than a raw list. Fine, but keep envelope stable — several test agents assumed raw list on first pass."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_super_admin_extended.py (NEW — supplements the base hierarchy test file with the 5 items the base file did not cover: chat-prompt/backup/impersonate super-only, list-super-admins, view_company_tasks cap toggling team-members visibility, extra_company_ids scope extension, non-owner temp super cannot promote)"
+  ],
+  "success_rate": {"backend": "100% (12/12)", "frontend": "100%"},
+  "test_credentials": "serkan / 19071987 (KURUCU + super_admin), acme_admin / acme12345 (admin @ ACME-RBAC-TEST) — from /app/memory/test_credentials.md.",
+  "seed_data_creation": "Backend pytest ephemerally creates RBACTEST-<sfx> + RBACX-A/B-<sfx> companies and rbac_admin_<sfx> / rbac_emp_<sfx> / rbacx_empB_<sfx> users. All test USERS are hard-deleted in the fixture teardown (mode=hard). Test COMPANIES remain (matches long-standing pattern in repo — see other passing test files like test_multi_company.py). No production data touched. acme_admin was NEVER promoted to temp super; only isolated test admins were promoted+revoked inside the pytest run.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Süper Yönetici / Kurucu hierarchy fully verified iter124. Key testIDs on web: super-admin-panel, admins-caps-list, promote-super-<id>, revoke-super-<id>, cap-view-tasks-<id>, cap-create-company-<id>. Key testIDs on mobile: settings-nav-super-admins, super-admins-screen, super-promote-<id>, super-cap-view-tasks-<id>. Single-session caveat is real: don't run serkan on web + mobile simultaneously — always use localStorage.clear() before switching users on web, and logout-button on mobile. For pytest, run with `-o addopts=\"\"` to disable the xdist default from pytest.ini (was causing bogus 'no scheme' errors before env was picked up).",
+  "rca of the issue": "N/A — feature verification pass, no new bugs found.",
+  "test_scenarios_executed": [
+    {"scenario": "BACKEND — Owner (serkan) role/flags via /api/auth/me", "result": "PASS: role=super_admin, is_owner=true, is_super_admin=true"},
+    {"scenario": "BACKEND — Admin is company-scoped (only sees own-company users in /admin/users)", "result": "PASS"},
+    {"scenario": "BACKEND — Super-only endpoints /system-quota, /super-admins, /health, /client-logs → 403 admin / 200 owner", "result": "PASS"},
+    {"scenario": "BACKEND — Additional super-only /admin/chat-prompt, /backup/status, POST /admin/users/{id}/impersonate → 403 admin", "result": "PASS"},
+    {"scenario": "BACKEND — Owner untouchable: PATCH/DELETE/impersonate owner as admin → 403", "result": "PASS"},
+    {"scenario": "BACKEND — Admin cannot POST /admin/users/{id}/super-admin → 403", "result": "PASS"},
+    {"scenario": "BACKEND — POST /companies as admin: without can_create_company=403, with cap=200", "result": "PASS"},
+    {"scenario": "BACKEND — Owner promotes admin to temp super {hours:2}: /auth/me shows super_admin + super_admin_until; temp super can hit /system-quota; temp super still 403 on owner PATCH; owner DELETE reverts to admin", "result": "PASS"},
+    {"scenario": "BACKEND — GET /admin/super-admins returns owner serkan (envelope: {super_admins:[...]})", "result": "PASS"},
+    {"scenario": "BACKEND — can_view_company_tasks cap OFF hides same-company employees from /team/members; toggle ON exposes them", "result": "PASS"},
+    {"scenario": "BACKEND — extra_company_ids=[cB] extends /admin/users listing to include cB's employees", "result": "PASS"},
+    {"scenario": "BACKEND — Temp (non-owner) super attempting POST /admin/users/{id}/super-admin on another user → 403; DELETE self /super-admin → 403", "result": "PASS"},
+    {"scenario": "WEB (serkan) — Settings tabs list contains all 16 tabs incl. SÜPER YÖNETICI, LISANSLAR, SERTEX PROMPT, İSTATISTIK", "result": "PASS"},
+    {"scenario": "WEB (serkan) — SÜPER YÖNETICI tab renders SuperAdminPanel: super-admin-panel + admins-caps-list + promote-super-<id> + cap-view-tasks-<id> + cap-create-company-<id> — serkan shown as KURUCU with crown", "result": "PASS"},
+    {"scenario": "WEB (acme_admin) — Settings hides İSTATISTIK / LISANSLAR / SERTEX PROMPT / SÜPER YÖNETICI; shows KULLANICILAR / ŞİRKETLER / YETKILER / İŞ KOLLARI / ARŞIV / DUYURULAR", "result": "PASS"},
+    {"scenario": "MOBILE (serkan) — Profile shows Kurucu; Tasks screen shows company filter (Tümü / AA_BadgeTest / ACME-RBAC-TEST)", "result": "PASS"},
+    {"scenario": "MOBILE (serkan) — AYARLAR → YÖNETİM PANELLERİ includes 'Süper Yönetici' link", "result": "PASS"},
+    {"scenario": "MOBILE (serkan) — /settings/super-admins screen: KURUCU crown, admin cap chips (Şirket görevlerini gör / Şirket açabilsın), Ek Şirket Görme chips, ATA (temporal grant) button, super-promote-<id>=1, super-cap-view-tasks-<id>=1", "result": "PASS"},
+    {"scenario": "MOBILE (acme_admin) — AYARLAR hides settings-nav-super-admins + Lisanslar; shows Kullanıcılar/Duyurular/Şirketler/Yetkiler", "result": "PASS"}
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "summary": "SERTEX Mobile FAZ B2 Wave 2 (Task Sharing / Görev Paylaşımı) — end-to-end verification on Expo web preview at mobile viewport 390x844. All 6 requested flows PASS: (1) PAYLAŞIM section renders in task detail directly BELOW EKLER (bounding-box Y: EKLER=352, PAYLAŞIM=462); (2) 'Paylaş' [testID task-detail-share-add] opens the share modal titled 'Kullanıcıyla Paylaş'; (3) search 'ahmet' [task-detail-share-search] returns 1 candidate, tapping [task-detail-share-user-<id>] switches to the permission picker, toggling [task-detail-share-perm-edit] + [task-detail-share-perm-complete] then [task-detail-share-save] persists via PUT /api/tasks/{id}/shares and closes the modal; (4) share item [task-detail-share-item-<uid>] appears with Turkish permission summary 'Görüntüle · Düzenle · Tamamla'; (5) tapping the item re-opens the edit modal with existing perms pre-filled, toggling assign+delete and re-saving updates the summary to 'Görüntüle · Düzenle · Tamamla · Ata · Sil'; (6) [task-detail-share-remove-<uid>] removes the row instantly and the section reverts to the empty state 'Bu görev kimseyle paylaşılmadı.'. Because the UI reflects only what api.setShares returns (onUpdated(updated); setRows(fromTask(updated))), backend persistence of shared_with is implicitly verified through the round-trip. No 401s, no crashes, no red screens. One minor cosmetic code issue: SharesSection uses colors.background (undefined in theme; the theme exports colors.bgBase) — non-blocking, ships as inherited/default color on web.",
+  "platforms_tested": ["mobile"],
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "mobile": {
+      "ui_bugs": [
+        {"component": "SharesSection permChip / saveBtn", "issue": "Uses colors.background which does not exist on the theme (theme exports colors.bgBase). On web preview text still renders (falls back to CSS inherited/default color) so 'Paylaş' save button label and active-chip labels look readable but slightly off contrast. On a native build the color may render as undefined/default black. Reference: /app/mobile/src/components/SharesSection.tsx:256,269,363,371 — replace colors.background with colors.bgBase.", "testID": "task-detail-share-save / task-detail-share-perm-*", "priority": "LOW"}
+      ],
+      "integration_issues": [],
+      "design_issues": [
+        {"screen": "Task Detail — Share modal", "issues": ["Permission chip active state relies on colors.background (undefined) for label text color; visually acceptable on web preview but should be fixed for native contrast (see ui_bug above)."]}
+      ],
+      "react_native_issues": [
+        {"component": "react-native-web pointerEvents (pre-existing)", "issue": "App-wide non-blocking deprecation warning 'props.pointerEvents is deprecated. Use style.pointerEvents'. Not caused by SharesSection — carried over from prior iterations."}
+      ]
+    }
+  },
+  "parity_issues": [],
+  "test_report_links": [
+    "/app/test_reports/iter114_mobile_01_detail.jpeg",
+    "/app/test_reports/iter114_mobile_02_search.jpeg",
+    "/app/test_reports/iter114_mobile_03_perms.jpeg",
+    "/app/test_reports/iter114_mobile_04_shared.jpeg",
+    "/app/test_reports/iter114_mobile_05_edited.jpeg",
+    "/app/test_reports/iter114_mobile_06_removed.jpeg"
+  ],
+  "action_items": [
+    "LOW: Fix colors.background → colors.bgBase in /app/mobile/src/components/SharesSection.tsx (lines 256, 269, 363, 371). This is the ONLY code issue found; feature is otherwise production-ready on mobile web preview.",
+    "Optional native smoke: run the same flow on Expo Go / dev-client to confirm the permission chip label & save button label render with the correct dark color on cyan (native RN would show default black on undefined color, may look OK; but bgBase (#02040A) is the intended contrast)."
+  ],
+  "critical_code_review_comments": [
+    "SharesSection.tsx:256,269,363,371 references colors.background but theme exports colors.bgBase — undefined color usage. Non-blocking on web but should be fixed for a11y/native parity.",
+    "SharesSection.tsx:112-117 openEdit correctly seeds picked and pre-fills existing perms — verified by the edit round-trip.",
+    "SharesSection.tsx:78-101 debounced user search filters out task owner and already-shared users — verified: after adding ahmet, re-searching 'ahmet' inside the same modal open would suppress him (not exercised here but the filter logic is correct).",
+    "SharesSection.tsx:119-138 persist() does full-list replace via api.setShares and calls onUpdated with the server-truth Task — this is the correct pattern for the PUT full-list-replace contract."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (skipped per request)", "frontend": "100% — all 6 requested behaviors verified on mobile web preview"},
+  "test_credentials": "serkan / 19071987 (admin) — target share user: ahmet / ahmet123",
+  "seed_data_creation": "Created one temp task TMP-SHARE-1785943882 via task-create-fab → task-form-save-button. Deleted at end of the run via task-detail-delete-button → task-detail-delete-confirm. Share on that task was also removed before delete. No residual data on the backend.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "FAZ B2 Wave 2 task sharing on mobile is functionally complete. Only outstanding item is the colors.background → colors.bgBase rename in SharesSection.tsx (4 occurrences). On the Expo web preview the modal 'Paylaş' save button is positioned near the bottom of the modal card and Playwright's click() can complain 'Element is outside of the viewport' — use page.eval_on_selector(sel, 'el => el.click()') as a workaround (worked in this iteration). Owner login was serkan (admin); the share target used was ahmet (employee). Task detail Share testIDs contract: task-detail-share-add/-item-<uid>/-remove-<uid>/-search/-user-<uid>/-perm-<edit|complete|assign|delete>/-save/-close.",
+  "rca of the issue": "No functional bug this iteration. Injection of <SharesSection task={task} onUpdated={setTask} onAuthError={handle401} /> at /app/mobile/app/task/[id].tsx:322 (directly below <AttachmentsSection />) is correct and renders as required. Sole cosmetic remark: colors.background is undefined in /app/mobile/src/theme/colors.ts (only bgBase/surface/surfaceAlt/primary exist), so SharesSection.tsx lines 256/269/363/371 pass color=undefined to the Ionicons icon and Text style — on react-native-web this results in inherited/default browser color and still looks OK, but on native it will render as the platform default (usually black) which is fine on cyan but not the intended #02040A. Fix is a one-line find-and-replace."
+}

@@ -1,0 +1,20 @@
+{
+  "summary": "Retest of CP4.35 fix for P1 double-inherit locked_by attribution regression. Ran full P1 CP4.35 suite (11 tests) + P0 CP4.34 suite (9 tests) via pytest. All 20 tests PASSED including the previously failing test_managed_and_self_dedup_managed_wins. Fix confirmed: channel-scoped attribution fields (default_lock_managed_set_by_user_id + default_self_lock_set_by_user_id) work correctly; create_task inherit correctly reads managed field with legacy fallback; no regressions in P0 suite.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_p1_cp435.py",
+    "/app/backend/tests/test_p0_cp434.py",
+    "/app/test_reports/pytest/iter66_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (20/20)", "frontend": "N/A"},
+  "test_credentials": "Admin: serkan/19071987, Employee: ahmet/ahmet123",
+  "seed_data_creation": "None (tests self-provision via API)",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "CP4.35 double-inherit fix verified. Previously failing test now passes; P0 CP4.34 suite still green. No further backend action required for this iteration.",
+  "rca of the issue": "Previous iter_65 regression: patch_user_lock_flags wrote default_lock_set_by_user_id in both channels, so assignee self-patch overwrote admin's managed attribution. Fix introduced channel-scoped fields (default_lock_managed_set_by_user_id vs default_self_lock_set_by_user_id) and updated create_task inherit to read the managed field with legacy fallback. Verified via test_managed_and_self_dedup_managed_wins: admin managed -> ahmet self -> task.locked_by == admin.id."
+}

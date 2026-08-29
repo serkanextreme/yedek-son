@@ -1,0 +1,48 @@
+{
+  "summary": "Full functional test of UX batch (TASK 1 collapse card + persistence, TASK 1b global collapse-all toggle, TASK 2 notification single/select/all delete, TASK 3 recurring reminder API persistence, TASK 4 detach/redock floating window). Backend: 5/5 pytest passing. Frontend: all core flows working end-to-end against preview URL as admin (serkan). One testid-naming deviation from the review request found in NotificationBell (functional, not broken).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "NotificationBell select-mode toggle",
+        "issue": "Review request specifies data-testid=notification-select-mode and data-testid=notification-delete-{id} plus checkbox testid; actual implementation uses data-testid=notification-select-toggle (button) and data-testid=notification-select-box-{id} (checkbox). Individual delete testid notification-delete-{id} is correct. This does not break functionality — select-mode + delete-selected + delete-all all worked in live tests (6 -> 5 via delete-selected, then -> 0 via delete-all, toast '5 bildirim silindi', empty state 'HENÜZ BILDIRIM YOK' shown). Only a naming mismatch between spec and code that may confuse automated tests / documentation.",
+        "affected_selectors": [
+          "notification-select-toggle (actual) vs notification-select-mode (spec)",
+          "notification-select-box-{id} (actual) vs notification-check-{id} (spec)"
+        ]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_ux_batch_tasks_notifications.py",
+    "/app/test_reports/pytest/ux_batch_results.xml"
+  ],
+  "action_items": [
+    "OPTIONAL: If the tester-facing spec is authoritative, rename NotificationBell testids: notification-select-toggle -> notification-select-mode and notification-select-box-{id} -> notification-check-{id}. Otherwise update the review-request spec to reflect the shipped testids."
+  ],
+  "critical_code_review_comments": [
+    "TasksPanel.jsx is now ~3103 LOC — continues to grow. Detach state (detachedIds), collapse state (collapsedIds), reorder DnD, context menu, and reminder UI could reasonably be split into dedicated files/hooks for maintainability.",
+    "In the tasks PATCH endpoint (tasks_router.py:512), status enum is hardcoded inline ('pending','done','paused','overdue') — consider centralising in tasks_models.py to avoid drift between backend and frontend labels.",
+    "Detached window state is intentionally transient (per problem statement) — good; but consider persisting positions/sizes to localStorage as a future UX polish (currently they reset on reload).",
+    "NotificationBell delete-all button fires immediately without an in-page confirm (only browser confirm dialog if any). Consider a small inline confirm step for destructive bulk action.",
+    "Testid naming inconsistency: notification-select-toggle vs the spec's notification-select-mode. Align to reduce automation-suite friction."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_ux_batch_tasks_notifications.py"
+  ],
+  "success_rate": {
+    "backend": "100% (5/5 pytest)",
+    "frontend": "100% functional on all TASK 1/1b/2/4 flows and TASK 3 UI element presence (persistence via backend)"
+  },
+  "test_credentials": "serkan / 19071987 (admin). See /app/memory/test_credentials.md",
+  "seed_data_creation": "Temporarily seeded 3 notifications via direct MongoDB insert (id prefix TEST_notif_) to verify delete-* flows because backend has no notification-create endpoint. All test notifications were cleaned up (delete-all in UI + delete_many verified 0 remaining).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Login button label is 'GİRİŞ YAP' (Turkish dotted-I) — use button:has-text(\"YAP\"). Always dismiss data-testid=overdue-alert-close after login before clicking [data-testid=tab-tasks]. Card-level collapse buttons share the prefix task-collapse- with the toolbar wrapper testid task-collapse-toolbar and the global button task-collapse-all — filter out both when iterating UUID-based cards. NotificationBell testids that actually exist in code: notification-bell, notification-badge, notification-popover, notification-select-toggle, notification-select-bar, notification-select-all, notification-delete-all, notification-delete-selected, notification-close, notification-item-{id}, notification-select-box-{id}, notification-delete-{id}, notification-unread-dot-{id}, notification-perm-approve-{id}. Recurring reminder input testid is ctx-reminder-repeat inside the ⋮/right-click menu's reminder submenu. To seed notifications for QA: insert directly into db.notifications with user_id, id, title, message, created_at, read_at:None — cleaner than triggering server-side events.",
+  "rca of the issue": "N/A — no reproduced bugs. Only a testid-naming spec/implementation mismatch documented under integration_issues; functionality intact."
+}

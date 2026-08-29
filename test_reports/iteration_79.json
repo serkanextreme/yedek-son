@@ -1,0 +1,24 @@
+{
+  "summary": "Frontend-only verification of Personel Görevleri person-filter Tümü-toggle bug fix + counter-sync suggestion. All primary scenarios pass end-to-end against preview URL. (1) Bug fix: Default state shows 'Tümü' checked with all-team stats (23 AKTİF / 15 GEÇTİ / 0 BEKLİYOR / 1 BİTTİ). Clicking 'Tümü' again unchecks it -> value becomes '__none__', trigger label shows 'Seçim yok — görev gösterilmiyor', all four stat cards drop to 0/0/0/0. Clicking 'Tümü' once more restores 23/15/0/1. (2) Counter sync: Picking emp1_test from the list produces stats 6/14/0/1 (only that person's tasks), trigger shows '👤 emp1_test' with overdue badge 14 and count (21). (3) Person filter search: typing 'emp1' filters chip list to 1 result. (4) Regression MINE scope: 21/7/2/2 with no person-filter toggle rendered (correct — kişi filtresi yok).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "PersonFilterSelect.jsx is compact (~124 LOC) and readable; three-state ('' / '__none__' / id) is a bit implicit — consider a small JSDoc block documenting the contract at the top of the file.",
+    "TasksPanel.jsx is ~2735 LOC and continues to grow; the statsBase branching for team/mine/__none__ around line 2283 would be a good candidate to extract into a pure helper (e.g., computeStatsBase(tasks, scope, personFilter, currentUserId)) with unit coverage — the semantics are subtle and easy to regress.",
+    "Trigger label combining name + overdue-badge + count is user-friendly; good UX touch."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (frontend-only run)", "frontend": "100% on the requested flows (Tümü toggle, counter sync, search, mine regression)"},
+  "test_credentials": "serkan/19071987 (admin) — see /app/memory/test_credentials.md",
+  "seed_data_creation": "None. Read-only verification.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Login button label is 'GİRİŞ YAP' — the 'İ' has a dot; a case-insensitive regex on 'giriş' can fail because Turkish dotted-I ≠ ASCII i. Use locator('button:has-text(\"YAP\")') or find by the SVG-less text 'GİRİŞ YAP' verbatim. Overdue alert modal ([data-testid=overdue-alert-close]) appears at login; dismiss before interacting with tabs. Stats cards live at data-testid=task-stat-{aktif|gecti|bekliyor|bitti}. Person filter testids match the spec: person-filter-toggle, person-filter-panel, person-filter-search, person-filter-list, person-chip-all, person-chip-{id}, person-overdue-{id}. Three-state contract: '' = Tümü (all team), '__none__' = unchecked (empty), '<id>' = single person. Settings-tabs regression was not exercised in this iteration because the primary bug/suggestion was fully covered; tab-settings selector opens the AYARLAR panel but timing may need extra wait.",
+  "rca of the issue": "Original bug: person-chip-all onClick only set '' unconditionally, so clicking an already-checked 'Tümü' was a no-op — user could not clear it. Fix in PersonFilterSelect.jsx line 72 now toggles: onClick={() => pick(value === '' ? '__none__' : '')}. TasksPanel.jsx short-circuits filtered=[] when scope='team' && personFilter==='__none__' (line 2212) and statsBase=[] for the same state (line 2286), so all four counters correctly show 0. Verified live: 23/15/0/1 -> 0/0/0/0 -> 23/15/0/1, and emp1_test → 6/14/0/1."
+}

@@ -1,0 +1,45 @@
+{
+  "summary": "Fully tested new Task Category hierarchy feature (rollup stats endpoint + PATCH re-parent with cycle guard + FE Taşı button/inline move form + FE chip progress). Both backend (6/6 pytest) and frontend flows work as specified.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_task_categories_hierarchy.py",
+    "/app/test_reports/pytest/task_categories_hierarchy.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "TasksPanel.jsx is ~2300 lines — consider splitting for maintainability (not a blocker).",
+    "Backend TaskCategory.company_id is typed str but existing seed data has null company_id categories; type mismatch is masked by response_model coercion but is a latent risk (creation endpoint now rejects null which is correct).",
+    "PATCH re-parent endpoint recomputes descendants by loading up to 5000 rows every move; acceptable for now but O(N) per move — consider indexing / caching if categories scale."
+  ],
+  "updated_files": ["/app/backend/tests/test_task_categories_hierarchy.py"],
+  "success_rate": {"backend": "100% (6/6)", "frontend": "100%"},
+  "test_credentials": "serkan / 19071987 (admin)",
+  "seed_data_creation": "test fixture creates TEST_parent_*, TEST_child_*, TEST_sibling_* categories + 3 tasks (2 parent, 1 child, 1 done) under first company; cleaned up in teardown. No residual test data.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend: TEST_ prefix cleanup works. If category creation fails with 400 'Şirket seçilmeli' the admin has no company_id and the test needs an explicit company_id fetched from GET /api/companies. UI: overdue-alert modal blocks interactions on login — dismiss with [data-testid=overdue-alert-close] first. Settings tab id is settings-tab-categories. Chips only render for categories that have tasks (empty categories like Kargolama show no chip). Rollup progress bar hidden by design when total=0.",
+  "verified_test_matrix": {
+    "backend": {
+      "GET /task-categories/stats returns direct counts (parent=2/1, child=1/0)": "PASS",
+      "Stats is flat (parent not aggregated on server)": "PASS",
+      "PATCH re-parent to another category": "PASS",
+      "PATCH parent_id=null moves to root": "PASS",
+      "PATCH under self → 400 with 'kendi' in detail": "PASS",
+      "PATCH under own descendant → 400 with 'alt kolun altına taşınamaz'": "PASS"
+    },
+    "frontend": {
+      "Login as serkan": "PASS",
+      "Settings → İş Kolları tab loads": "PASS",
+      "category-rollup-Fason Verme shows '1/3' progress bar": "PASS",
+      "category-rollup-Kargolama absent (0 tasks — by design)": "PASS",
+      "category-move-Kargolama opens inline form with select": "PASS",
+      "Move select lists 'Kök (ana seviye)' + eligible parents": "PASS",
+      "Selecting Fason Verme + save re-parents Kargolama (toast + tree updates)": "PASS",
+      "Selecting Kök moves back to root (toast: 'Kargolama ana seviyeye alındı')": "PASS",
+      "Move dropdown of Fason Verme (parent) excludes self and Kargolama (descendant) — cycle prevention in UI": "PASS",
+      "Tasks panel chips: TÜMÜ (3/17), FASON VERME (1/3) with progress bar, KOLSUZ (2/14)": "PASS",
+      "category-chip-progress-{name} testid present with (done/total)": "PASS"
+    }
+  }
+}

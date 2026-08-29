@@ -1,0 +1,44 @@
+{
+  "summary": "Faz 3.5 chat-embedded live charts: 9/14 backend tests pass + UI (pie) renders correctly. Found ONE root-cause bug: Turkish intent regex in chat_chart_service._INTENT_RE fails to match declensions 'grafiği' and 'grafiğini' — every user example in the review request ('Ay bazında toplam satış grafiğini göster', '...grafiği göster', etc.) is misclassified as non-chart intent so chart=None even though a spreadsheet exists. All 5 failures collapse to this single bug. Pie/column/sütun paths work end-to-end (LLM plan → chart_data → assistant_message.chart → RechartsChart SVG rendered under msg-chart-<id> with title + filename·sheet footer). License gate (402), non-chart→None, x==y edge case, no-spreadsheet silent fallback, and RAG/sources coexistence all verified.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "/api/chat (chart intent detection in chat_chart_service.py)",
+        "issue": "Regex `_INTENT_RE` pattern `grafi[ğk]\\b` requires a word boundary after ğ/k, but Turkish accusative/possessive forms 'grafiği' and 'grafiğini' have a word char immediately after (i, ini) so the boundary never fires. Effect: canonical user prompts like 'Ay bazında toplam satış grafiğini göster' silently return chart=None. Fix: replace `grafi[ğk]\\b` with `grafi[ğk]\\w*` (or `graf(ik|iğ)\\w*`) so declensions are captured. This blocks the very examples given in the review request.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_chat_chart.py",
+    "/app/test_reports/pytest/chat_chart_results.xml"
+  ],
+  "action_items": [
+    "Fix intent regex in /app/backend/chat_chart_service.py to match Turkish declensions of 'grafik' — e.g. change `grafi[ğk]\\b` to `grafi[ğk]\\w*`. After fix, the 4 currently-failing chat tests (test_bar_chart_ay_toplam, test_chart_persisted_in_history, test_chart_response_includes_sources_field, test_memory_extraction_still_works) and the regex unit test (test_intent_missed_turkish_declensions_BUG) will all pass."
+  ],
+  "critical_code_review_comments": [
+    "chat_chart_service._INTENT_RE — trailing \\b after `[ğk]` breaks on Turkish declensions; add \\w* to accept 'grafiği/grafiğini/grafikleri'.",
+    "chat_chart_service._llm_plan_chart passes a plain string prompt into the LLM but system prompt uses single-quoted JSON literal with 'error':'no_match' — LLMs sometimes return double-quoted JSON only; the fallback still works because `_parse_json_block` handles this, but consider hardening.",
+    "server.py chat() invokes try_generate_chat_chart(req.message) but message may contain memory-command echoes; guarded by manual_content/forget_keyword flags — OK.",
+    "Message model's chart field is Optional[ChatChart] and stored via model_dump — verified round-trip in DB and GET /conversations/{id}/messages (chart persisted intact)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_chat_chart.py (new — 14 tests across 8 test classes)"
+  ],
+  "success_rate": {
+    "backend": "64% (9 pass / 1 skip / 4 chart-generation fail — all one root cause / 1 explicit regex-bug test)",
+    "frontend": "100% (chart renders under msg-chart-<id> with SVG, title, filename·sheet footer)"
+  },
+  "test_credentials": "ahmet / ahmet123 (regular user, active license SERTEX-G863-27XN-2EXB); serkan / 19071987 (admin).",
+  "seed_data_creation": "Uploaded /app/backend/tests/fixtures/satislar.xlsx as ahmet during tests; deleted post-run. Created and cleaned up one TEST_unl_* unlicensed user for the 402 gate test.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend addopts is `-n 2 --dist loadscope` — chat tests hit `SESSION_KICKED: Başka bir cihazdan giriş yapıldı` because two workers log in as the same user in parallel. Always run this file with `-n 0` (serial). Fixture path: /app/backend/tests/fixtures/satislar.xlsx (10 rows Ürün/Kategori/Adet/Birim_Fiyat/Ay/Toplam). Backend logs at /var/log/supervisor/backend.err.log show `chat_chart_service - INFO - Chat chart spec: ...` when the pipeline runs; absence of that log for a chart-intent request is the smoking gun for the intent-regex miss.",
+  "rca of the issue": "1) Reproduce: `curl -X POST /api/chat -d '{\"message\":\"Ay bazında toplam satış grafiğini göster\"}'` → assistant_message.chart is null. 2) Trace: no `Chat chart spec:` line appears in backend logs for this request. 3) Root cause: `_INTENT_RE.search('Ay bazında toplam satış grafiğini göster')` returns None because `grafi[ğk]\\b` requires a non-word char (or EOL) immediately after ğ/k, and in 'grafiğini' the char after 'ğ' is 'i' (word). 4) Mitigation: change the alternative from `grafi[ğk]` to `grafi[ğk]\\w*` (matches grafik, grafiği, grafiğini, grafikleri). Verified by running `looks_like_chart_request` locally against every failing phrase — all four return False today; the phrase 'pasta grafiği çiz' passes only because it matches the `pasta` alternative. The UI screenshot confirms rest of the pipeline is healthy: given a properly-detected intent, the pie chart renders end-to-end with axes/legend/filename footer."
+}

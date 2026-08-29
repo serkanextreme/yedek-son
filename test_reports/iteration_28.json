@@ -1,0 +1,38 @@
+{
+  "summary": "Faz 3 — Excel Automation end-to-end verification (backend + frontend). Created /app/backend/tests/test_excel.py (21 tests, all PASS in 27s). Backend: analyze/formula/query/pivot/charts all return contract-correct payloads on the 10-row sample workbook (Ürün/Kategori/Adet/Birim_Fiyat/Ay/Toplam). Formula for 'Toplam sütununun tüm satırların toplamını hesapla' → =SUM(F2:F11). Query for 'Hangi ay en yüksek satış yaptı?' → correctly identifies Mart (126000+30000=156000). Pivot xlsx_b64 decodes to a real 6.2 KB xlsx (PK header verified). Charts returns 5 chart specs (COLUMN/BAR/SCATTER/LINE). Non-spreadsheet .txt → 400 with 'Excel/CSV değil'. Cross-user (ahmet vs serkan) → 404. Missing bearer token on all 5 endpoints → 401/403. Regression: /api/health, /api/files, /api/memory, /api/tasks, /api/notes, /api/auth/me all 200. Frontend: xlsx upload → file card renders → green Excel button (emerald-300) present next to İndeksle → Excel modal opens with excel-modal testid → all 5 tabs render → analyze auto-loads insight (1706 chars, Turkish, starts with **Dosya:**) → formula tab yields =SUM(F2:F11) in excel-formula-text → query tab yields answer mentioning Mart → pivot tab yields 5-row preview table + working XLSX İNDİR download (real xlsx blob) → charts tab renders 5 chart cards. All data-testid selectors match the spec exactly.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_excel.py",
+    "/app/test_reports/pytest/iter28_excel.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "excel_service.py: analyze_workbook, generate_formula, answer_data_question, build_pivot_xlsx, suggest_charts — all correctly use LlmChat with gpt-5.2 via EMERGENT_LLM_KEY and _parse_json_block for tolerant JSON extraction (code-fence + first{..last} fallback). Good defensive parsing.",
+    "excel_service.py:_build_pivot correctly flattens MultiIndex columns to ' · '-joined strings, reset_index() before to_excel(index=False), and coerces column labels to str — matches the fix note in the review request.",
+    "excel_service.py: MAX_ROWS_PER_SHEET=50k, PIVOT_MAX_ROWS=5k caps in place for large-file safety. SAMPLE_HEAD=15 / SAMPLE_TAIL=5 keeps LLM prompt bounded.",
+    "excel_router.py:_load_owned_workbook is the single ownership+category guard — DRY. Returns 404 for missing/other-user, 400 for non-spreadsheet, 502 for storage failure, 400 for corrupt xlsx via ValueError. Clean.",
+    "excel_router.py: All 5 endpoints require Depends(current_user) → confirmed 401/403 when Authorization header is missing.",
+    "Pivot endpoint base64-encodes xlsx bytes (xlsx_b64) instead of returning a StreamingResponse — this is intentional per contract since the modal caches spec+preview+xlsx together in one response for offline re-download without a second round-trip.",
+    "ExcelModal.jsx (486 lines) — approaching the 700-line split threshold but still cohesive. Auto-analyze on open via useEffect keyed to [file] is correct; charts lazy-load on tab switch via useEffect keyed to [tab]. All 12 required data-testid keys present.",
+    "FilePanel.jsx: file-excel-{id} button only rendered for f.category==='spreadsheet' — verified: does NOT appear for .txt/.pdf/.jpg. Green emerald-300 color class confirmed.",
+    "downloadBase64Xlsx() uses atob + Uint8Array + Blob('.xlsx MIME') — standard and works; confirmed via Playwright download interception (6238 bytes, PK header)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_excel.py (NEW — 21 test cases across TestExcelAuth/Isolation/CategoryGuard/Analyze/Formula/Query/Pivot/Charts/Regression)"
+  ],
+  "success_rate": {"backend": "100% (21/21 in test_excel.py)", "frontend": "100% (upload → open modal → all 5 tabs verified end-to-end incl. xlsx download)"},
+  "test_credentials": "serkan / 19071987 (admin, seeded). ahmet / ahmet123 (auto-provisioned via /api/admin/users in the ahmet_token fixture).",
+  "seed_data_creation": "Each test module uploads TEST_excel_<uuid>.xlsx (5.3 KB, 10 rows, Turkish column names) as admin, then deletes it via /api/files/{id} DELETE in fixture teardown. A TEST_note_<uuid>.txt is also created + deleted to verify the non-spreadsheet 400 guard.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Excel Faz 3 suite lives at /app/backend/tests/test_excel.py. Run with: cd /app/backend && python -m pytest tests/test_excel.py -v -n 0. All LLM calls use gpt-5.2 via EMERGENT_LLM_KEY and take ~3-8s each; total suite ~27s. Test workbook uses UTF-8 Turkish column names (Ürün, Kategori, Ay). If future test flakiness appears in TestExcelQuery due to LLM phrasing variance, the assertion only checks for lowercase 'mart' substring — kept intentionally loose. Frontend flow: login as serkan → click [data-testid=tab-files] to open Dosyalar panel → set files on [data-testid=file-upload-input] → wait 7s → hover [data-testid=file-item-<id>] to reveal actions → click [data-testid=file-toggle-<id>] to expand → click [data-testid=file-excel-<id>] to open ExcelModal.",
+  "rca_of_the_issue": "N/A — no issues found. Faz 3 Excel Automation passes every requirement in the review request end-to-end. Backend + Frontend + integration + auth + isolation all green."
+}

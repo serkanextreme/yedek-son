@@ -1,0 +1,24 @@
+{
+  "summary": "Frontend-only regression + mobile viewport + native-shell simulation testing for Faz 9 CP4.20 viewport rescale fix (Android APK left-cut HUD). All 3 scenarios verified. Desktop regression clean, CSS guard does NOT leak, native shell simulation produces correct viewport meta + overflow-x:auto behavior with zero console errors.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/test_reports/desktop_1920.png", "/app/test_reports/mobile_400_before.png", "/app/test_reports/mobile_400_native.png"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "nativeShell.js line 36: scale formula `Math.min(1, Math.max(0.28, actualWidth / targetDesktopWidth))` gives ~0.312 for 400px viewport — matches the manual injection value used in test. Correct.",
+    "index.css lines 228-232: body[data-native] guard is properly scoped — verified no leak to desktop or non-native mobile.",
+    "Note: The Playwright/Chromium desktop engine does NOT re-layout on viewport-meta rewrite (that is a mobile-browser feature). Real Android WebView WILL respect width=1280 + initial-scale=0.312 and actually shrink the layout. Cannot fully validate visual rescale outside a physical device or Android emulator — logic and attributes verified only. Recommend confirming on actual APK before shipping."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (skipped)", "frontend": "100%"},
+  "test_credentials": "serkan / 19071987 (admin)",
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Faz 9 CP4.20 mobile-viewport rescale fix validated. Verified: (1) Desktop 1920x900 login flow — no dataNative attribute, overflow-x:hidden, no horizontal overflow, no console errors — CSS guard did not leak. (2) Mobile 400x800 plain browser — dataNative remains null (Capacitor not native), overflow-x:hidden default preserved. (3) Native simulation via document.body.setAttribute('data-native','android') + viewport meta rewrite to `width=1280,initial-scale=0.312,...` — CSS overflow-x:auto activates, sidebar-tab-bar (y=683) and notification-bell (x=55,y=17) remain reachable in 400x800, zero console errors. Note: Chromium desktop engine does not re-layout on viewport-meta rewrite; real APK/WebView required for pixel-level visual validation of the rescale.",
+  "rca of the issue": "Original bug: Android APK Capacitor WebView loaded desktop-optimized HUD (>=1280px canvas) into ~400px phone viewport, clipping the LEFT column of the layout. Fix: nativeShell.js dynamically rewrites viewport meta to width=1280 + computed initial-scale (~0.312) so WebView proportionally shrinks the whole HUD; index.css adds overflow-x:auto safety net scoped to body[data-native=android|ios]; public/index.html base viewport supports pinch-zoom (min=0.25, max=3). Verified via injection simulation that CSS + attribute logic function correctly and do not regress web build."
+}

@@ -1,0 +1,34 @@
+{
+  "summary": "SERTEX mobile FAZ B1 wave 1 (rich task card + search highlight) verified end-to-end via Expo web preview (390x844) as serkan/19071987. All 6 acceptance items pass: rich task cards render with accent bar / status pill / due date coloring (overdue shows red 25.02.2026 10:00 with alert icon on 'Bineği al') / subtask progress bar (X/Y) / reminder bell / assignee avatars where applicable; typing 'resim' filters to 1 result and highlights the matched substring with cyan background (rgba(0,240,255,0.18)); toggle to done->pending round-trips and updates the accent/strikethrough; task detail shows Bitiş, Alt Görevler, and Hatırlatma sections with reminder chips (Kapalı/1/3/7/14 gün) which set and disable correctly; create-via-FAB adds the task to the list. No blocking bugs.",
+  "platforms_tested": ["mobile"],
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "mobile": {
+      "ui_bugs": [],
+      "integration_issues": [],
+      "design_issues": [],
+      "react_native_issues": [
+        {"component": "props.pointerEvents", "issue": "Console warning during login/route change: 'props.pointerEvents is deprecated. Use style.pointerEvents'. Coming from a library (react-native-safe-area-context or expo-router internals), not from the new TaskRow/tasks code. Same warning noted in iter108/iter109. Non-blocking."}
+      ]
+    }
+  },
+  "parity_issues": [],
+  "test_report_links": ["/app/test_reports/iter110_tasks_home.jpeg", "/app/test_reports/iter110_search_resim.jpeg", "/app/test_reports/iter110_detail_dates.jpeg", "/app/test_reports/iter110_detail.jpeg"],
+  "action_items": [
+    "OPTIONAL: chase down the deprecated `pointerEvents` prop coming from a library (react-native-web internals) — same warning tracked across iter108/109/110."
+  ],
+  "critical_code_review_comments": [
+    "TaskRow.tsx renderTitle() correctly does case-insensitive substring match without regex — safe against special chars in search input.",
+    "TaskRow.tsx: subtask progress bar renders width as `${(counts.done / counts.total) * 100}%` — division-by-zero guarded because subtaskCounts() returns null when total is 0. Good.",
+    "TaskRow.tsx: `hasReminder` uses `reminder_days != null` (loose) — intentionally treats 0 as 'has reminder'; matches types.ts semantics.",
+    "TaskRow.tsx: assignee list falls back to task.assignee_name when task.assignees is empty. Consistent with backend legacy field."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (skipped per request)", "frontend": "6/6 acceptance items = 100%"},
+  "test_credentials": "serkan / 19071987 (admin)",
+  "seed_data_creation": "Created 1 TESTQA_iter110_<ts> task via FAB; deleted via preview backend after verification. Verified 'Remaining: 0'. Additionally: toggled BUG69_UI_d7510a4e_TASK_2 done then back to pending (net-zero change); set 'Bineği al' reminder to 3 gün then back to Kapalı (net-zero change). Preview DB left clean.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Mobile FAZ B1 wave 1 is done. testID surface for TaskRow: task-row-<id>, task-toggle-<id>, task-row-start-<id>, task-row-due-<id>, task-row-reminder-<id>, task-row-assignees-<id>. Search input testID: tasks-search-input. Expand-all: tasks-expand-all-button. Login token is stored in localStorage under 'sertex.auth.token' (JSON-encoded string — strip quotes) — useful for API cleanup. When automating Expo web preview modals at 390x844, native RN Pressables are best clicked via element.evaluate('el => el.click()') to bypass viewport-visibility strictness in Playwright.",
+  "rca of the issue": ""
+}

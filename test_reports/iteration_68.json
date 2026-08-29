@@ -1,0 +1,46 @@
+{
+  "summary": "Full E2E validation of Faz 9 CP6 Global Announcement System (backend + frontend + SSE fan-out). All 9 pytest backend tests pass serially. Frontend admin CRUD, RBAC filtering, banner render, dismiss, ack, and real-time SSE delivery all work correctly. Cleaned up all PYTEST_ann_* rows after tests.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "backend/tests/test_announcements.py", "issue": "Tests fail when run in parallel (pytest-xdist default -n auto in pytest.ini) because both workers login as same 'serkan' user and second login triggers SESSION_KICKED single-session policy. Run with -n0 for reliable results, or scope xdist to loadfile / use unique test accounts. Not a functional bug — the announcement system itself is fine."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Homepage on login", "issues": ["Overdue tasks modal ('SÜRESİ GEÇMİŞ GÖREV') has no data-testid on its close X button and doesn't close on Escape, making it hard to interact with settings modal beneath during automated tests. Suggest adding data-testid='overdue-modal-close' and Escape key handler. Cosmetic — not a blocker."]}
+    ]
+  },
+  "test_results_detail": {
+    "backend_pytest": "9/9 passed (test_announcements.py) — TestPublishRBAC (admin publish 200, employee 403), TestValidation (empty title/invalid severity/role-without-value all → 400), TestTargetingAndAck (role filtering, all-target ack idempotent), TestCrudAndStats (update, soft-delete, purge, stats).",
+    "frontend_admin_flow": "PASS — Settings modal opens via CustomEvent, DUYURULAR tab present (admin only), AnnouncementManager renders, YENİ DUYURU modal opens, form fields (title/message/target/severity) fill, YAYINLA publishes → row appears (data-testid=ann-row-<uuid>), Stats button reveals target_count=35, ack_count=1, ack_ratio=2.86%.",
+    "frontend_rbac": "PASS — DUYURULAR tab count=0 for ahmet (employee); admin-only gating works.",
+    "frontend_banner_sse": "PASS — After serkan published via API, ahmet's already-open tab rendered the AnnouncementBanner within 500ms via SSE (no polling). Title/message rendered, severity=critical showed red color, KRİTİK label.",
+    "frontend_ack_flow": "PASS — Critical + require_ack=true announcement shows ANLADIM button (not X). Clicking ack removes banner, backend stats confirm ack_count incremented to 1.",
+    "frontend_dismiss_flow": "PASS — Info+require_ack=false shows X (dismiss), clicking removes banner locally.",
+    "cleanup": "2 PYTEST_ann_* announcements purged via DELETE /purge after tests."
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_announcements.py",
+    "/app/test_reports/pytest/announcements_results.xml"
+  ],
+  "action_items": [
+    "OPTIONAL: Adjust pytest.ini or test_announcements.py to avoid xdist parallel session-kicking (e.g., use --dist loadfile or -n0 for this file, or set unique test users). This is a test-harness issue, not an application bug.",
+    "OPTIONAL: Add data-testid + Escape handler to Overdue tasks modal for better testability."
+  ],
+  "critical_code_review_comments": [
+    "AnnouncementBanner + NotificationBell SSE re-broadcast pattern works reliably; latency <500ms from publish to render.",
+    "Backend RBAC and Pydantic validation correct; role/company target filtering enforced server-side.",
+    "Soft-delete vs hard-purge separation is clean; stats returns 404 after purge as expected.",
+    "Idempotent ack (already=true on second call) works as documented."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "serkan/19071987 (admin), ahmet/ahmet123 (employee) — from /app/memory/test_credentials.md",
+  "seed_data_creation": "None persisted — all PYTEST_ann_* rows purged.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Announcement system Faz 9 CP6 fully green. SSE fan-out latency <500ms verified. When running test_announcements.py locally, use `pytest backend/tests/test_announcements.py -n0` to avoid xdist parallel SESSION_KICKED false-positives. The overdue tasks modal blocks the settings modal on serkan's fresh sessions; close it by clicking near coordinates (950,158) or by adding a testid."
+}

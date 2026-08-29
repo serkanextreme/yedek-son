@@ -1,0 +1,109 @@
+{
+  "theme": "dark",
+  "archetype": "Electric & Neon (Future, Speed, Disruption) - Futuristic AI-HUD Inspired",
+  "typography": {
+    "headings": "Orbitron, Rajdhani, or Space Mono (Tech/HUD vibe)",
+    "body": "Inter or Roboto (Clean, readable)",
+    "monospace": "JetBrains Mono, Fira Code, or Source Code Pro (For HUD data and logs)",
+    "rules": [
+      "Use tight letter spacing for HUD metrics.",
+      "Use uppercase with wide tracking (e.g., tracking-[0.2em]) for overlines, system status, and labels.",
+      "Avoid standard sans-serif for primary HUD titles; use monospace or technical sans.",
+      "Do NOT use Space Grotesk."
+    ]
+  },
+  "colors": {
+    "background": {
+      "base": "#02040A",
+      "surface": "#050914",
+      "panel": "rgba(5, 9, 20, 0.55)"
+    },
+    "accents": {
+      "primary": "#00F0FF",
+      "secondary": "#0066FF",
+      "glow": "rgba(0, 240, 255, 0.5)",
+      "warning": "#FFB800",
+      "danger": "#FF003C"
+    },
+    "text": {
+      "primary": "#E2F1FF",
+      "secondary": "#8AB4F8",
+      "muted": "#4B72A8"
+    },
+    "rules": [
+      "Never use pure white (#FFFFFF) or pure black (#000000). Always tint with navy/blue.",
+      "Gradients should be used for glowing effects and light bleeds, not flat backgrounds.",
+      "Avoid teal green (#1B93A4) for dashboards."
+    ]
+  },
+  "visual_enhancers": {
+    "glassmorphism": {
+      "background": "bg-[#050914]/60",
+      "blur": "backdrop-blur-xl",
+      "border": "border border-[#00F0FF]/20",
+      "shadow": "shadow-[0_0_20px_rgba(0,240,255,0.05)]",
+      "inner_glow": "shadow-[inset_0_0_20px_rgba(0,102,255,0.1)]"
+    },
+    "glow_effects": "Use drop-shadow-[0_0_8px_rgba(0,240,255,0.6)] on key icons, active state text, and HUD readouts.",
+    "hud_elements": "Add technical grid overlays, corner brackets (border-t-2 border-l-2), crosshairs, and subtle scanlines to panels.",
+    "textures": "Use extremely subtle noise overlay to give the deep space background a physical, cinematic texture."
+  },
+  "layout": {
+    "structure": "Full-screen absolute/fixed layout (100vh). No global scrolling. Content scrolls within specific glass panels.",
+    "center": "Large 3D Holographic Sphere rendering using React Three Fiber. Absolute centered (z-0), forming the core of the UI.",
+    "corners": "HUD Overlays fixed to corners (z-10). Top-Left: System Status & Language, Top-Right: Time/Date & Weather, Bottom: Voice Controls & Text Input.",
+    "sidebars": "Collapsible glassmorphism panels on left/right for Chat History, Notes, and Reminders (z-20)."
+  },
+  "components": {
+    "HolographicSphere": "Use @react-three/fiber and @react-three/drei. Render a <Sphere> with wireframe or an emissive standard material. Animate rotation and scale using useFrame hook based on idle/listening/speaking states.",
+    "VoiceVisualizer": "Create an audio waveform visualization at the bottom when listening/speaking. Use an array of vertical bars animated with framer-motion reacting to an audio mock state.",
+    "TypewriterText": "For AI chat responses, use a typewriter effect (e.g., revealing text character by character) paired with a monospace font to feel like system output.",
+    "HUDIndicators": "Use absolute positioning. Add technical micro-copy like 'SYS.ONLINE', 'LAT.12ms', 'MEM.42%' scattered around to build the futuristic AI-HUD feel.",
+    "GlassPanel": "Reusable wrapper for Notes, Chat, and Reminders using the glassmorphism rules. Must have sharp or slightly rounded corners (max rounded-md)."
+  },
+  "motion": {
+    "transitions": "Smooth, futuristic transitions. Use framer-motion for panel sliding (x-axis translations) and opacity fading.",
+    "sphere_states": {
+      "idle": "Slow, smooth continuous rotation. Subtle cyan glow.",
+      "listening": "Pulsating scale (1 to 1.1) with increased emissive glow. Color shift to bright cyan.",
+      "thinking": "Erratic wireframe rotation, deep blue/magenta hue shifts.",
+      "speaking": "Rapid waveform-like fluctuations in scale. Intense cyan glow."
+    }
+  },
+  "libraries_to_install": [
+    "framer-motion",
+    "three",
+    "@react-three/fiber",
+    "@react-three/drei",
+    "lucide-react",
+    "date-fns",
+    "sonner"
+  ],
+  "accessibility": [
+    "Ensure minimum 4.5:1 contrast ratio for all text over glass panels. Use text-shadow if necessary.",
+    "DO NOT use complete transparent backgrounds for dropdowns or modals.",
+    "Add data-testid attributes to all interactive elements (buttons, inputs, toggles, panel triggers)."
+  ],
+  "instructions_to_main_agent": [
+    "Setup a dark space theme by updating tailwind.config.js with the provided colors and extending the font families.",
+    "Import Google Fonts: 'Orbitron' and 'JetBrains Mono' (or similar monospace/tech fonts) via index.css.",
+    "Implement the layout with a central 3D scene (React Three Fiber) occupying the full background using absolute positioning.",
+    "Create HUD overlays with absolute positioning in the four corners.",
+    "Implement the Sidebar for Notes/Reminders using Framer Motion for slide-in/out animations.",
+    "The central sphere MUST respond to the AI states (Idle, Listening, Thinking, Speaking) using props that drive Three.js animations.",
+    "Add a typewriter effect for AI chat messages to match the futuristic AI-HUD aesthetic.",
+    "DO NOT use generic Shadcn default styling. Heavily customize components with the glassmorphism, 1px cyan borders, and glowing text.",
+    "Implement a Language Toggle (TR/EN) in the HUD."
+  ],
+  "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": [
+    "Do not use generic centered layouts or simplistic gradients.",
+    "Create depth through layered design elements with z-index hierarchy.",
+    "Use glass-morphism effects with backdrop filters (12-24px blur).",
+    "You MUST NOT apply universal transition. Eg: transition: all. Always add transitions for specific interactive elements excluding transforms.",
+    "You MUST NOT center align the app container, ie do not add .App { text-align: center; } in the css file.",
+    "Every interaction needs micro-animations - hover states, transitions, and entrance animations.",
+    "NEVER: use AI assistant Emoji characters like 🤖🧠💭💡🔮🎯 etc for icons. Use technical icons from lucide-react.",
+    "Always use modern futuristic button styles (sharp corners or lightly rounded with neon glow on hover and 1px inner borders).",
+    "All interactive and key informational elements MUST include a data-testid attribute."
+  ]
+}

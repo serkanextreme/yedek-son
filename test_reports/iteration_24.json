@@ -1,0 +1,27 @@
+{
+  "summary": "Frontend regression + new voice-VAD/auto-submit UI tested for Sertex. All acceptance criteria for iteration_24 (voice auto-stop hint + regression) verified successfully. Zero JS pageerrors during the mic-click flow and full chat/settings regressions.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "speech.js createWhisperRecorder: onSilence handler fires from a requestAnimationFrame callback but the recorder's stop() is invoked from InputBar's onSilence which sets autoSubmitRef then calls stopWhisper(); this is fine but if the user rapidly toggles the mic before VAD stabilizes, vadStarted flag prevents double-fire — good.",
+    "InputBar.jsx onend for native STT reads latestTextRef and calls onSend without also clearing interim — minor. interim is separately reset by onend via setInterim(''). OK.",
+    "Consider debouncing the VAD RMS threshold (18) with a moving average — some quiet-voice speakers on low-gain mics may fall below THRESHOLD and never trigger speechStartAt (currently 400ms speech gate). Not blocking but worth noting for real-user telemetry."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (frontend only)", "frontend": "100%"},
+  "test_credentials": "username: serkan / password: 19071987 (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 24 verified: (1) [data-testid=voice-auto-hint] renders with exact text 'KONUŞUN — SUSUNCA OTOMATİK GÖNDERİLİR' when mic-button is clicked and listening=true. (2) mic-button border switches to border-sertex-danger while listening. (3) Manual re-click of mic stops without errors, hint disappears. (4) Voice OFF flow: clicking [data-testid=voice-toggle] then sending a message shows no stop-speaking-button (speaking never triggered). (5) Regression: chat send, settings > alarm tab open, no JS pageerrors. Actual audio-driven VAD (RMS threshold triggering onSilence) and Whisper transcription cannot be validated in headless Playwright as it uses --use-fake-device-for-media-stream producing silent/simple frames — this is an environmental limitation, not a bug. Chromium in playwright takes the NATIVE Web Speech path (SpeechRecognition available), so the Whisper VAD code path (createWhisperRecorder in speech.js) was not exercised at runtime; it was code-reviewed only. Firefox/Mobile real-user validation is required for the Whisper VAD RMS threshold path.",
+  "rca of the issue": "N/A — no bugs found"
+}

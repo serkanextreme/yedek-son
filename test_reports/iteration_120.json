@@ -1,0 +1,38 @@
+{
+  "summary": "Mobile frontend (Expo web preview) tested for two new features: (1) AnnouncementBanner overlay + (2) Mobile User Detail screen. All flows PASSED. Banner appears on all 4 tabs (Görevler/Takım/Bildirim/Profil); critical/require_ack=true hides X and only shows ANLADIM; info/require_ack=false shows both X and ANLADIM; X dismiss hides for session only (banner returns after reload); ANLADIM ACK calls POST /api/announcements/{id}/ack and banner does NOT return after reload (acked persists). User Detail screen loads profile+quota+summary correctly; emp1_test shows stats grid (19 Toplam / 1 Tamamlanan / 18 Bekleyen / 0 Duraklatılan / 13 Geciken) and quota Deneme (30 gün) 0,01 MB / 100 MB; serkan (self) correctly shows 'Bu kullanıcı için görev özeti görünmüyor.' Regression: DÜZENLE opens UserFormModal, SİL opens ConfirmModal, FAB admin-user-add still opens create modal with username + password fields.",
+  "platforms_tested": ["mobile"],
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "mobile": {
+      "ui_bugs": [],
+      "integration_issues": [],
+      "design_issues": [],
+      "react_native_issues": [
+        {"component": "shadow* style props", "issue": "Console warning: 'shadow*' style props are deprecated. Use 'boxShadow' instead. Occurs on all Expo web renders (likely from FAB shadowColor/shadowOpacity in /app/mobile/app/settings/users.tsx:154 and possibly other cards)."},
+        {"component": "pointerEvents prop", "issue": "Console warning: props.pointerEvents is deprecated. Use style.pointerEvents. Likely from a library or a View using the deprecated prop; low severity."}
+      ]
+    }
+  },
+  "parity_issues": [],
+  "test_report_links": [
+    "/app/test_reports/iter120_critical_banner.jpg",
+    "/app/test_reports/iter120_after_ack.jpg",
+    "/app/test_reports/iter120_detail_emp1_ok.jpg",
+    "/app/test_reports/iter120_detail_serkan_ok.jpg"
+  ],
+  "action_items": [
+    "(Low-priority) Replace deprecated 'shadow*' StyleSheet props with 'boxShadow' for RN Web compatibility; and replace props.pointerEvents with style.pointerEvents."
+  ],
+  "critical_code_review_comments": [
+    "AnnouncementBanner is an absolute overlay pinned at top with paddingTop = insets.top + xs but there is NO corresponding top padding pushed into the tab content. On tabs where the first content row starts at insets.top, the banner may visually cover the header/search row. Observed: on GÖREVLER the banner overlays the SERTEX title header (screenshot). If this is by design (2b was chosen), ignore; otherwise consider adding a spacer equal to banner height so content is not obscured.",
+    "AnnouncementBanner polls every 60s but only reads server-side acked list on refresh; if user acks on one device, the other in-memory list still contains it until the next poll. Acceptable for a 60s window."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "not tested (skip backend)", "frontend": "100%"},
+  "test_credentials": "serkan/19071987 (admin), emp1_test/emp12345, mgr_test/mgr12345",
+  "seed_data_creation": "Created two announcements via POST /api/announcements for banner testing: (a) info + require_ack=false (b) critical + require_ack=true. Both purged via DELETE /api/announcements/{id}/purge after testing. No residual test data.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Cleanup successful: only the pre-existing (inactive) announcement 'ZZ Ann 5j7qt' remains. Note: single-session caveat — any curl login as serkan kicks the mobile serkan session (401 SESSION_KICKED) and vice versa; sequence your API prep and UI login accordingly.",
+  "rca of the issue": ""
+}

@@ -1,0 +1,33 @@
+{
+  "summary": "Wave 3 mobile ADMIN retest (Expo web preview @ 414x896, serkan/19071987). Both HIGH+LOW fixes from iteration_118 are VERIFIED. (1) ANNOUNCEMENTS delete: created 'ZZ Ann 5j7qt' via admin-ann-add + admin-ann-title/message/severity(warning)/admin-ann-save; row appeared. Tapped admin-ann-delete-<id> + confirm-ok → row DISAPPEARED from the list immediately, and after full page reload it is STILL gone (is_active=false soft-deleted rows are now filtered client-side per announcements.tsx:62). (2) PERMISSIONS duplicate feedback: opened admin-mv-add with the seeded pair mgr_test (Müdür) → emp1_test which already exists in the 67 seeded manager-visibility rows. Tapping EKLE now shows inline red 'Bu eşleşme zaten tanımlı' error, form stays open, and NO new row was created (67 → 67). Client-side dup check in permissions.tsx:77-80 works. Regression: USERS create temp 'zztest_5j7qt' + role→manager edit + delete OK; COMPANIES 'ZZ Co 5j7qt' create + delete OK; LICENSES generate 1 monthly (banner '1 lisans üretildi' shown) + delete generated key OK. All temp entities cleaned up. No red screens; only known web-only warnings (shadow*/pointerEvents deprecations).",
+  "platforms_tested": ["mobile"],
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "web": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+    "mobile": {
+      "ui_bugs": [
+        {"component": "LicensesScreen / PermissionsScreen modals", "issue": "Primary action buttons inside modals (ÜRET in licenses.tsx:154, EKLE in permissions.tsx:161) have no testID. This forced the E2E test to use text=/role selectors, which are brittle: Playwright get_by_role('button', name='ÜRET') timed out because the underlying Pressable does not expose role='button' in RN Web output. Had to fall back to JS-clicking the parent element. Add testIDs (e.g. ADMIN.licGenerateSave, ADMIN.mvSave) to make E2E robust — same pattern already used for admin-ann-save.", "testID": "n/a (missing)", "priority": "LOW"}
+      ],
+      "integration_issues": [],
+      "design_issues": [],
+      "react_native_issues": []
+    }
+  },
+  "parity_issues": [],
+  "test_report_links": [],
+  "action_items": [
+    "OPTIONAL/LOW: Add testIDs to the primary action Pressable in the LicenseGenerate modal (licenses.tsx:154, e.g. testID='admin-license-generate-save') and the New Visibility modal (permissions.tsx:161, e.g. testID='admin-mv-save'). This mirrors admin-ann-save and eliminates the need for text/JS fallbacks in E2E."
+  ],
+  "critical_code_review_comments": [
+    "announcements.tsx:62 correctly filters is_active !== false. Consider surfacing 'Pasif' rows behind an admin toggle in the future if hard-delete is not desired.",
+    "permissions.tsx save() also does a self-mapping check (managerId === employeeId). Backend still returns 400 'Hedef kullanıcı müdür değil' if the target is neither manager nor admin — good, but a translated inline hint before submit would prevent a round-trip."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a", "frontend": "100%"},
+  "test_credentials": "serkan / 19071987",
+  "seed_data_creation": "Created and CLEANED UP: temp announcement 'ZZ Ann 5j7qt' (deleted); temp user 'zztest_5j7qt' (deleted); temp company 'ZZ Co 5j7qt' (deleted); 1 generated monthly license (deleted). Nothing left behind.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Both Wave-3 fixes verified. If the LOW action item (add testIDs to license-generate-save and mv-save modal buttons) is picked up, update the test scripts accordingly. No other outstanding issues on /settings/announcements, /settings/permissions, /settings/users, /settings/companies, /settings/licenses.",
+  "rca of the issue": "Iteration 118 announcements delete bug root cause: backend soft-deletes announcements (sets is_active=false) but GET /api/announcements returns ALL rows. Fix in announcements.tsx:62 filters `a.is_active !== false` after each load; delete now removes the row from view immediately and after reload. Iteration 118 permissions silent-duplicate root cause: form did not do a client-side check before POSTing an existing (manager,employee) pair. Fix in permissions.tsx:77-80 iterates existing rows and sets formError 'Bu eşleşme zaten tanımlı' before calling the API — verified with the seeded mgr_test→emp1_test mapping."
+}

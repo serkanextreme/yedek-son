@@ -1,0 +1,40 @@
+{
+  "summary": "Iteration 10 — Full backend + frontend verification of (a) reminder→task startup migration and (b) TasksPanel stat-filter buttons + removal of the 'Hatırlatmalar' tab from the Sidebar. Backend: 25/25 pytest passes, including 3 NEW migration tests (moves reminders correctly with reminder_at/status derivation, idempotent on repeat startups via id check, no-op when reminders empty). Frontend (Playwright, real backend URL): confirmed only 3 tabs exist [tab-history, tab-tasks, tab-notes] and tab-reminders is absent from the DOM. Stat buttons (task-stat-aktif/gecti/bekliyor/bitti) are clickable with aria-pressed. Single-select filter shows only that bucket, second click toggles off. Multi-select (GECTI+BITTI) shows combined; FİLTRE summary line + task-clear-filters button appear/disappear correctly. Selected buttons receive ring-2 + scale-[1.03] styling. With active filter + no matches → 'Bu filtreye uygun görev yok' rendered (verified visually — CSS text-transform makes it appear uppercase). Existing task checkbox + 3-dot menu still functional under active filter. No regressions.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Sidebar header (top of NEURAL LINK panel)", "issues": ["Subtitle still reads 'GEÇMİŞ · NOTLAR · HATIRLATMALAR' (Sidebar.jsx line 86 uses t(lang,'reminders')). The Reminders tab was removed, so this subtitle is now stale/misleading. Consider changing to 'GEÇMİŞ · GÖREVLER · NOTLAR' to match the 3 tabs actually shown."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_reminder_migration.py",
+    "/app/backend/tests/test_tasks.py",
+    "/app/test_reports/pytest/iter10_backend.xml"
+  ],
+  "action_items": [
+    "MINOR (design): Update Sidebar.jsx line 86 to remove 'HATIRLATMALAR' from the header subtitle since the tab was removed — replace with 'GÖREVLER' (or drop entirely) so subtitle matches the 3 visible tabs."
+  ],
+  "critical_code_review_comments": [
+    "Startup migration (server.py L55-75) works but has minor risks: (1) .to_list(length=1000) caps at 1000 reminders — fine for single-user MVP but worth noting. (2) No try/except around the loop — if any single reminder doc is malformed the whole migration + delete_many will abort mid-way. Consider wrapping the per-item logic in try/except. (3) The idempotency check does 1 find_one per reminder (N+1 queries) — acceptable for small N.",
+    "logger is defined AFTER the @app.on_event('startup') handler (server.py L451). So the logger.info in _startup will succeed at call-time (import order Python), but this is fragile. Consider moving logging config above.",
+    "Sidebar.jsx L86 still hardcodes t(lang,'reminders') in the subtitle → results in 'HATIRLATMALAR' being displayed even though the tab is gone. Cosmetic but confusing.",
+    "TasksPanel.jsx bucketOf uses isOverdue() which checks status==='overdue' OR due_date<now — matches the stats calculation exactly. Filter buckets are consistent.",
+    "TasksPanel.jsx is 864 lines — exceeds the 700-line guideline. Recommend splitting ContextMenu, EditTaskModal, TaskCard, useReminderScheduler into separate files (also raised in iteration_9).",
+    "Filter state (filters array) is local to TasksPanel — not persisted. On refresh, filters reset. Not a bug per requirements but worth documenting."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_reminder_migration.py (new)"
+  ],
+  "success_rate": {
+    "backend": "25/25 = 100% (3 new migration tests + 22 existing task tests, all pass; migration test restarts backend twice via supervisorctl)",
+    "frontend": "9/9 UI assertions = 100% (3-tab-only DOM, no tab-reminders, all 4 stat buttons render, single-select filter with aria-pressed + list filtering + clear button visibility, second click removes filter, multi-select GECTI+BITTI shows both in summary + list, Temizle clears everything, ring-2+scale styling on selected, empty-state text with filter, checkbox+3-dot menu functional under active filter)"
+  },
+  "test_credentials": "username=serkan, password=19071987 (verified working)",
+  "seed_data_creation": "test_reminder_migration.py directly seeds/cleans db.reminders + db.tasks via pymongo (MONGO_URL/DB_NAME from backend/.env). Playwright flow seeded 4 TEST_UI10_* tasks (aktif/gecti/bekliyor/bitti buckets) — all deleted at end of run. During empty-state test the pre-existing 'resim ciz' pending task was temporarily patched to paused then restored to pending; verified final DB state matches original.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Sidebar now has EXACTLY 3 tabs: tab-history, tab-tasks, tab-notes. Any legacy test using tab-reminders/reminder-title/reminder-add/reminder-toggle/reminder-delete must be dropped. TasksPanel stat buttons are interactive filters — data-testid=task-stat-{aktif|gecti|bekliyor|bitti}, aria-pressed=true when selected, class contains 'ring-2' + 'scale-[1.03]' + 'bg-sertex-cyan/10' when active. Empty state text is CSS-uppercased via hud-text class (so DOM text('Bu filtreye uygun görev yok.') renders as 'BU FILTREYE UYGUN GÖREV YOK.') — use case-insensitive matching. task-clear-filters button only appears when filters.length>0. Restart backend via `sudo supervisorctl restart backend` — migration runs on every startup so seeding docs into db.reminders and restarting is a reliable way to test the migration. Login: serkan / 19071987. Test file locations: /app/backend/tests/test_reminder_migration.py (new) and /app/backend/tests/test_tasks.py (unchanged from iter9).",
+  "rca of the issue": "No functional bugs found. One cosmetic gap: Sidebar header subtitle still reads 'HATIRLATMALAR' after the reminders tab was removed (Sidebar.jsx line 86, `t(lang,'reminders')`). Not blocking but should be updated to keep header consistent with the 3 tabs shown."
+}

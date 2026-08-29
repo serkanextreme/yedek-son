@@ -1,0 +1,34 @@
+{
+  "summary": "Faz 8 CP4 (İş Kolları/Task Categories) tested end-to-end. Backend: 8/8 new pytest + 49/49 regression tests (tasks, task_reassign, team_faz2, team_rbac) all PASS. Frontend: Categories CRUD panel (create/rename/delete) works flawlessly with toast, employee tab correctly hidden (RBAC), task-category-select dropdown in new-task form works, category-filter-bar with all 4 chip variants (all/Kargolama/Fason Verme/none) with correct counts renders correctly. HOWEVER, a real bug was found in the right-click context-menu path: the 'İş Koluna Taşı' item is missing and the task-category-{id} badge is never rendered because `ReorderableTaskCard` does not forward the category props. See rca of the issue.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "TasksPanel.jsx :: ReorderableTaskCard (line 2123)", "issue": "categories, categoryName, and onSetCategory props are NOT passed to TaskCard when the default (drag-and-drop) render path is used. Consequence: (1) ContextMenu.items filter drops the 'İş Koluna Taşı' entry because categories is undefined/empty, so users cannot right-click → move to iş kolu; (2) the task-category-{id} badge never appears on task cards. The fallback branch (line 2151, used when filters active) DOES pass these props and works fine.", "selector": "[data-testid^=\"task-item-\"] → right-click → menu has only 9 items, missing 'İş Koluna Taşı'", "priority": "HIGH"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_task_categories.py",
+    "/app/backend/tests/test_task_reassign.py",
+    "/app/backend/tests/test_team_faz2.py",
+    "/app/backend/tests/test_team_rbac.py",
+    "/app/backend/tests/test_tasks.py"
+  ],
+  "action_items": [
+    "Fix TasksPanel.jsx ReorderableTaskCard render (~line 2123): pass categoryName={categories.find(c=>c.id===t.category_id)?.name||null}, categories={categories}, and onSetCategory={(cid)=>setTaskCategory(t.id, cid)} — mirror what's already done in the plain TaskCard branch at line 2151. After this fix, the right-click 'İş Koluna Taşı' submenu (ctx-category-submenu, ctx-category-pick-*, ctx-category-none) and task-category-{id} badge should render correctly."
+  ],
+  "critical_code_review_comments": [
+    "TasksPanel.jsx is 2200+ lines — consider splitting TaskCard, ContextMenu, EditModal, and reminder scheduler into separate files.",
+    "Silent .catch(() => setCategories([])) in categories loader can hide auth/network errors; consider surfacing to a toast on non-401 statuses.",
+    "Bug: ReorderableTaskCard uses ...rest spread from parent map, but the parent map at line 2123 explicitly omits the category props. Either always pass them from the map (recommended) or move the categories/onSetCategory injection into a wrapper hook so both branches stay in sync."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (57/57 tests)", "frontend": "~85% (categories CRUD + settings RBAC + task-form dropdown + filter chips OK; context-menu submenu + card badge broken via ReorderableTaskCard path)"},
+  "test_credentials": "serkan/19071987 (admin), mgr_test/mgr12345 (Test Company A manager), emp1_test/emp12345 (Test Company A employee)",
+  "seed_data_creation": "None. Only ephemeral CP4UITest/CP4Renamed test category was created and cleaned up in-test. 2 persistent categories (Kargolama + Fason Verme) preserved.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "After main agent fixes the ReorderableTaskCard props, re-run frontend right-click flow: (1) mgr_test → Görevler tab → right-click on any task → menu must include 'İş Koluna Taşı' item → hover it → ctx-category-submenu appears with ctx-category-none + ctx-category-pick-Kargolama + ctx-category-pick-Fason Verme (current one has ✓ Check icon). Click a chip → task.category_id updates → task-category-{id} badge should appear on the card. Verify category-chip counts update accordingly.",
+  "rca of the issue": "TasksPanel.jsx has two render branches for tasks: (a) ReorderableTaskCard at line 2123 (drag-and-drop enabled default view), (b) plain TaskCard at line 2151 (used when filters are active). Branch (b) correctly passes categoryName/categories/onSetCategory. Branch (a) does NOT. Since users almost always start in the default (no-filter) view, the drag-enabled path is what they see — so 'İş Koluna Taşı' is invisible for most users. ContextMenu's items array uses `(categories && categories.length > 0) && { label: 'İş Koluna Taşı', ... }` — falsy → filtered out by .filter(Boolean). Reproduction: mgr_test → Görevler tab (no filter) → right-click any task → menu shows 9 items (no 'İş Koluna Taşı'). Mitigation: extend the map at line 2123 to pass categoryName + categories + onSetCategory, identical to line 2151."
+}

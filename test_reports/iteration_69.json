@@ -1,0 +1,51 @@
+{
+  "verdict": "fixed",
+  "user_reported_bug": "ya sen bozmussun devolet ettim duzelmedi maxx acıyorum acilen duzelt ayrıca programı arsive gönderiyorum asagıda program arsive gonderildi diye uyarısı cok gec geliyor bunuda arastır (Meaning: The drag-and-drop reorder bug is STILL broken even after deploy, and separately: when archiving a task, the 'task archived' toast notification comes way too late.)",
+  "summary": "No relevant testing skill found. Verified the two reported P0 symptoms on the preview URL: real UI drag of task #3 to #1 no longer snaps back and persisted after reload; category-filtered drag reorder also persisted after reload. With a 2.5s delayed PATCH route, archive toast appeared before the network round trip (precise DOM timing: 174.2ms after click; row removed 66.9ms) and backend persisted archived=true; unarchive was also observed instant in the first UI run (15ms toast/row removal). Targeted task regressions (create, status toggle, reminder set, title edit) passed via UI/API evidence.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/tests/bug_verification/task_bug69_api_setup.py",
+    "/app/test_reports/task_bug69_api_setup_output.json",
+    "/app/test_reports/bug69_precise_timing.json",
+    "/app/tests/bug_verification/task_bug69_regression_api.py",
+    "/app/test_reports/bug69_regression_api_results.json",
+    "/app/test_reports/bug69_ui_regression_results.json"
+  ],
+  "action_items": [
+    "Deploy this exact preview build to production if production is still stale; no additional fix needed for the verified preview flow.",
+    "Optional: add an automated Playwright regression around task drag reorder persistence and optimistic archive/unarchive toast timing."
+  ],
+  "critical_code_review_comments": [
+    "TasksPanel.jsx setArchived() now calls toast.success() immediately after optimistic state update and before awaiting tasksApi.setArchived().",
+    "TasksPanel.jsx handleReorderTasks() stamps local sort_order = n - idx before setTasks(), preventing the derived sorted view from reverting on the next render.",
+    "backend/routers/tasks_router.py /api/tasks/reorder persists sort_order = float(n - idx) with visibility checks."
+  ],
+  "updated_files": [
+    "/app/tests/bug_verification/task_bug69_api_setup.py",
+    "/app/tests/bug_verification/task_bug69_regression_api.py",
+    "/app/tests/bug_verification/task_bug69_ui_followup_script.txt",
+    "/app/test_reports/task_bug69_api_setup_output.json",
+    "/app/test_reports/bug69_precise_timing.json",
+    "/app/test_reports/bug69_regression_api_results.json",
+    "/app/test_reports/bug69_ui_regression_results.json",
+    "/app/test_reports/bug_verification_69.json",
+    "/app/test_reports/iteration_69.json"
+  ],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "100% for targeted bug flows"
+  },
+  "seed_data_creation": "Created focused test tasks with prefix BUG69_UI_d7510a4e plus regression/archive timing tasks under serkan. Some test tasks remain in the preview database for auditability.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Skill lookup was mandatory and returned no relevant skill. Preview URL used: https://functional-themes.preview.emergentagent.com. Main seeded task IDs: b02a4348-98cc-4286-9cb9-831274da5a04, 549c3ba0-d536-48b7-adfe-7503e6b0afb0, eea23cc1-b8e2-4d9e-9633-2dd2d9ac8984, 294366aa-c1eb-4086-b0ec-36ecf4d804b0. Current persisted seeded order after category test is TASK_2, TASK_3, TASK_1, TASK_4, matching the final filtered drag scenario.",
+  "rca_of_the_issue": "Previous snap-back was caused by frontend sorted memo re-sorting by stale sort_order after optimistic drag. The current fix updates local sort_order before render and backend persistence matches it. Previous archive-toast lag was caused by waiting for PATCH completion; the current fix shows toast immediately and rolls back only on failure. Verification included an artificial 2.5s PATCH delay to prove the toast is no longer gated by network latency."
+}

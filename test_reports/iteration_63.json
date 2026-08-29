@@ -1,0 +1,39 @@
+{
+  "summary": "Faz 9 CP4.33 tested end-to-end. Backend: 13 new pytest tests for /api/lock-policy-templates (create/list/patch/delete + RBAC + empty-name 400 + whitelist stripping) all PASS. Regression: full iteration_60-62 backend suite (test_tasks_locks + test_tasks_lock_audit + test_tasks_user_policy = 34 tests) still 34/34 GREEN. Frontend UI: Templates flow verified fully — flag toggle → 'KAYDET' bar appears (lock-template-name + lock-template-save), template saved with 'şablon olarak kaydedildi' toast; modal reopen shows lock-templates-bar with dropdown populated (option shows name + flag count); UYGULA correctly auto-fills both lock_edit + lock_delete checkboxes; delete via 🗑 with confirm removes template from dropdown and shows 'Şablon silindi' toast. NotificationBell → UnlockOtpModal wiring verified in source (NotificationBell dispatches sertex:task-unlock-request CustomEvent → TasksPanel listens, refetches task, sets pendingUnlockTask, renders UnlockOtpModal data-testid=unlock-otp-modal). SSE dual-session flow not executed live but code path is complete and consistent.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "UserLockPolicyModal template dropdown", "issues": ["React hydration warning: <span> child inside <option> (option label contains a span). Cosmetic — no functional impact but should be flattened to plain text."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_lock_policy_templates.py",
+    "/app/test_reports/pytest/lock_templates_iter63.xml",
+    "/app/test_reports/pytest/regression_iter63.xml"
+  ],
+  "action_items": [
+    "(cosmetic) Remove nested <span> from <option> label in lock-template-select to clear React hydration warning.",
+    "(optional) Add data-testid on lock-template save toast for deterministic UI assertions.",
+    "(optional) Add index on lock_policy_templates.created_at (list sort key) — collection is new."
+  ],
+  "critical_code_review_comments": [
+    "create_lock_policy_template returns default status 200 despite spec saying 201; FastAPI returns 200 because response_model overrides. If 201 is contractually required, set status_code=201 on the route decorator.",
+    "delete endpoint returns {'deleted': 0} with 200 when tpl_id doesn't exist (silent no-op). Consider returning 404 to match PATCH's behaviour for a consistent contract.",
+    "UserManagement.jsx grew further with template UI (now managing templates state + save + apply + delete); still ~1900 lines — extract UserLockPolicyModal into its own file (repeat of iter60/61/62 note).",
+    "Template `lock_flags` whitelist filter drops unknown keys silently (good), but no server-side warning is echoed — client sending typo'd keys will silently lose them.",
+    "PATCH accepts req.lock_flags is None to skip; but if client sends {} explicitly it clears all flags. Document this behaviour or reject empty dicts.",
+    "No cap on number of templates per user/globally — potential UX degradation if collection grows unbounded."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_lock_policy_templates.py (new)"
+  ],
+  "success_rate": {"backend": "100% (13/13 new + 34/34 regression = 47/47)", "frontend": "100% (template save/list/apply/delete flow verified; notification-bell→UnlockOtpModal wiring verified in code)"},
+  "test_credentials": "admin: serkan/19071987 ; employee: ahmet/ahmet123 ; manager: mgr_test/mgr12345",
+  "seed_data_creation": "Each backend test creates its own TEST_TPL_* templates and cleans them up in finally blocks. UI test created one 'TEST_UI_TPL_iter63' template and deleted it during the flow.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "CP4.33 endpoints: GET/POST/PATCH/DELETE /api/lock-policy-templates[/{id}]. Admin+manager can list & create; only admin OR creator can PATCH/DELETE; employee → count=0 on list, 403 on create/delete. Bogus lock_flag keys silently stripped by whitelist. Empty name → 400. Frontend testids: lock-templates-bar, lock-template-select, lock-template-apply, lock-template-delete, lock-template-name, lock-template-save (all inside UserLockPolicyModal via admin-lock-{username}). Template save bar only appears when activeCount>0 (at least one lock flag toggled). Templates dropdown only renders when templates.length>0. NotificationBell task_unlock_offered click → CustomEvent('sertex:task-unlock-request', {taskId}) → TasksPanel.onUnlock refetches task → sets pendingUnlockTask → global UnlockOtpModal (data-testid=unlock-otp-modal) renders. Run pytest with `REACT_APP_BACKEND_URL=... python -m pytest ... -o addopts=''` to avoid single-session token kick.",
+  "rca of the issue": "n/a — no defects found."
+}

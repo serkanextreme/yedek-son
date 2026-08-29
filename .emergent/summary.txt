@@ -1,0 +1,119 @@
+<analysis>**original_problem_statement**: 
+The user wants to manage finished/archived tasks (already implemented). The system required soft-delete functionality, reason tracking, and role-based permissions. The main blocker was that the newly published mobile app on their physical device was throwing a Cannot reach server / check connection error upon login.
+
+**User's preferred language**: Turkish (TR). INSTRUCT next agent to respond in the user's preferred language only.
+
+**what currently exists?**: 
+A cross-platform task management SaaS (React Web + Expo Mobile + FastAPI Backend). The app has a fully functioning Archive v2 system. The mobile production build login issue was recently fixed by manually configuring the production backend URL in the mobile environment variables.
+
+**Last working item**: 
+    - Last item agent was working: Preparing to refactor  (which is over 2700 lines). The agent explained the risks and benefits, and the user decided to create a fork first before proceeding. Since this is the new fork, the refactoring is the immediate next step.
+    - Status: NOT STARTED
+    - Agent Testing Done: N
+    - Which testing method agent to use? Frontend testing agent
+    - User Testing Done: N
+
+**All Pending/In progress Issue list**: 
+  None. The production login issue was successfully verified and resolved by the user.
+
+**In progress Task List**: 
+  Task 1: Refactor  (Priority: P0)
+  
+  Task Detail:
+  - Task 1: 
+     - Where to resume: Discuss with the user to start Phase 1 (safe extraction of constants/helpers) of splitting the 2700+ line  file.
+     - What will be achieved with this? Improved maintainability and reduced code complexity without altering the UI/UX behavior.
+     - Status: NOT STARTED
+     - Should Test frontend/backend/both after fix? frontend
+     - Blocked on something: Waiting for user confirmation in this new fork to begin.
+
+**Upcoming and Future Tasks**
+  - Task 2: Connection Warning UI Enhancement (P1) - Display a clear warning screen with a Try Again button when the server cannot be reached on mobile.
+  - Task 3: Auto-Retry for Login (P2) - Automatically retry the login request once in the background if a network error occurs.
+
+**Completed work in this session**
+- Resolved mobile production login failure (sunucuya ulaşılamadı) by explicitly setting  to the live domain in .
+- Updated  with a Runbook detailing the mobile URL injection workaround for production publishing.
+- Fixed backend CORS setup by setting .
+- Removed destructive  startup operations in .
+- Removed  exclusion patterns from  to unblock deployment pipelines.
+
+**Earlier issues found/mentioned but not fixed**
+  None
+
+**Known issue recurrence from previous fork**
+  - Issue recurrence in previous fork: Mobile RN Web deprecated shadow prop warnings.
+  - Recurrence count: 1
+  - Status: NOT STARTED
+
+**Code Architecture**
+- : FastAPI server, MongoDB, APScheduler for cron jobs.
+- : React Web App using Shadcn UI components.
+- : Expo (React Native) app utilizing expo-router.
+
+**Key Technical Concepts**
+FastAPI, MongoDB, React, Expo/React Native, APScheduler.
+
+**key DB schema**
+  - tasks: 
+  - system_settings: 
+
+**changes in tech stack**
+  - None in this session.
+
+**All files of reference** 
+  -  (Updated with production URL for mobile builds)
+  -  (Fixed CORS and removed destructive db startup)
+  -  (Fixed to allow env variables in deployments)
+  -  (Updated with Runbook)
+  -  (Target for refactoring)
+
+**Areas that need refactoring**: 
+-  (2728 lines long. Needs to be split into smaller, manageable components).
+
+**key api endpoints**
+  - POST 
+  - GET 
+
+**Critical Info for New Agent** 
+- **Mobile Environment Workaround:** To fix the production mobile app, the previous agent hardcoded the live production domain into  (). The user is aware that this causes the mobile preview to connect to the live production database. **DO NOT change this back** unless the user explicitly asks to restore preview isolation. 
+- **Refactoring:** The user explicitly requested to fork the project before touching  to avoid breaking working code. Since you are in the new fork, politely confirm with the user if they are ready to begin the refactoring process. Do it carefully and iteratively.
+- **Language:** ALWAYS communicate in Turkish.
+
+**documents and test reports created in this job** 
+  - 
+
+**Last 10 User Messages and any pending HUMAN messages** 
+ - fork yapalım sonra bakalım (Completed - This fork represents the fulfillment of this request. Pending confirmation to start refactoring).
+ - bunun amacı ney yaparken dosyaları bozma (Completed - Agent explained the refactoring purpose).
+ - nerede kaldık (Completed - Agent summarized status).
+ - tamam simdi oldu bak bunu sakın unutma her defasında biz böyle ugrasıyoruz nasıl yaptıgını unutma (Completed - Agent documented the fix in the PRD runbook).
+
+**Project Health Check:**
+- Broken: None.
+- Mocked: None.
+
+**3rd Party Integrations** 
+- MongoDB (Database)
+- Push Notifications (Mobile)
+
+**Testing status**
+  - Testing agent used after significant changes: NO (User manually verified the production build).
+  - Troubleshoot agent used after agent stuck in loop: NO (Support agent used to clarify deployment).
+  - Test files created: None.
+  - Known regressions: None.
+
+**Credentials to test flow:**
+Check 
+
+**What agent forgot to execute**
+N/A. The session paused gracefully awaiting the user to create this exact fork.
+
+**Debugging checklist for current issue**
+    Issue: Refactoring 
+    Frontend files to check: 
+    - 
+    Plan:
+    1. Extract constants and generic helper functions that do not rely on component state.
+    2. Extract smaller UI sub-components (like modals, dialogs) passing state via props.
+    3. Ensure no loss of functionality or state mismatch. Run testing agent after each extraction phase.</analysis>

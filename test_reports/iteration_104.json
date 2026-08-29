@@ -1,0 +1,40 @@
+{
+  "summary": "Mobile V1 (Expo web preview) frontend testing complete. All requested flows PASSED: login renders correctly (no blank/white screen), invalid creds show Turkish error 'Kullanıcı adı veya şifre hatalı' and stay on /login, valid serkan/19071987 login navigates to /tasks. Tasks screen loads 17 tasks under 3 category sections (Fason Verme 2/5, Kargolama 0/0, Kategorisiz 1/12) with correct done/total roll-ups and header count 'GÖREVLER · 3/17 tamamlandı'. Task toggle round-trip works (PATCH /api/tasks/{id}) — pill switches Bekliyor↔Tamamlandı and strikethrough appears. Expand-all/collapse-all correctly show/hide all task rows (17↔0 visible). Bottom tab navigation to PROFİL works, profile shows username 'serkan' and role 'Yönetici', logout button returns to /login. testIDs align with request. Minor: search with a no-match query still renders empty category headers instead of the empty state (empty state only triggers when there are zero categories, not when categories have zero filtered tasks) — cosmetic UX. Two React Native web deprecation console warnings observed ('shadow*' style props deprecated → use boxShadow; props.pointerEvents deprecated) — non-blocking.",
+  "platforms_tested": ["mobile"],
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "mobile": {
+      "ui_bugs": [],
+      "integration_issues": [],
+      "design_issues": [
+        {"screen": "tasks", "issues": ["Search that matches zero tasks still shows all category headers (each with 0 rollup) rather than the 'Sonuç bulunamadı' empty state. Consider hiding categories whose rollup.total === 0 during an active search, or fall back to the empty state when no task rows are rendered. Reference: /app/mobile/app/(tabs)/tasks.tsx (nodes memo + empty branch condition)."]}
+      ],
+      "react_native_issues": [
+        {"component": "shadow* style props", "issue": "Console warning: '\"shadow*\" style props are deprecated. Use \"boxShadow\"'. Likely emitted from login button shadow* props. Reference: /app/mobile/app/login.tsx:190-194 (shadowColor/shadowOpacity/shadowRadius/shadowOffset). Migrate to boxShadow for RN Web / RN 0.76+."},
+        {"component": "props.pointerEvents", "issue": "Console warning: 'props.pointerEvents is deprecated. Use style.pointerEvents'. Origin appears internal (Expo Router / RN Web), but confirm none of your own components pass pointerEvents as a prop; move to style.pointerEvents if any are found."}
+      ]
+    }
+  },
+  "parity_issues": [],
+  "test_report_links": [],
+  "action_items": [
+    "(Cosmetic) Improve search UX on /tasks — either hide categories with rollup.total === 0 during search or show the tasks-empty-state when no tasks match. File: /app/mobile/app/(tabs)/tasks.tsx.",
+    "Replace deprecated shadow* style props on the login button with boxShadow to silence the RN Web deprecation warning. File: /app/mobile/app/login.tsx (styles.button).",
+    "Audit for any props.pointerEvents usage in mobile source and migrate to style.pointerEvents (currently no direct hit found in review; warning may be third-party)."
+  ],
+  "critical_code_review_comments": [
+    "expo-linear-gradient replacement with solid View works correctly on web preview — login no longer blank.",
+    "TasksScreen.onToggleExpand toggles via 'prev[id] === false' pattern which correctly treats undefined as open by default — behavior verified via expand/collapse-all round trip.",
+    "buildTaskTree correctly rolls up done/total including nested children; observed 2/5 + 0/0 + 1/12 = 3/17 which matches header total 3/17.",
+    "Optimistic update in onToggleTask reverts on ApiError — good; also handles 401 via handleUnauthorized → logout.",
+    "testIDs on all interactive elements match request spec (login-*, tasks-*, task-toggle-*, tasks-category-header-*, profile-*, logout-button)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "not tested (per request)", "frontend": "100% (all requested flows passed)"},
+  "test_credentials": "serkan / 19071987 (admin) via POST /api/auth/login",
+  "seed_data_creation": "none",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Mobile V1 (login + tasks + profile) is functionally green on the Expo web preview at https://sertex-enterprise.expo.preview.emergentagent.com at viewport 390x844. Categories observed live: Fason Verme (5 tasks), Kargolama (0), Kategorisiz (12). Single-session caveat still applies: mobile login as serkan rotates the session and kicks any active web serkan token. If parity testing later, use ahmet/ahmet123 in parallel. Only cosmetic search-empty-state issue + two RN Web deprecation warnings remain.",
+  "rca of the issue": "n/a — no functional bugs found this iteration."
+}

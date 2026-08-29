@@ -1,0 +1,36 @@
+{
+  "summary": "Verified fixes for the two live-user bugs: (1) creator can now include themselves in a multi-assignee task, (2) the assignee picker is a searchable, scrollable dropdown panel with 'Kendim (ben de dahilim)' at the top. Backend pytest self-multi (3 new) + sharing (7) + scope (10) = 20/20 pass (serial). Frontend UI verified end-to-end: opened picker, saw self as first option, filtered by search ('emp1' filters to emp1_test), selected Kendim + emp1_test, saw 2 selected chips, submitted task, toast 'Görev 2 kişiye atandı (siz dahil)' shown, 2 per-assignee checkboxes rendered on card, task counter incremented from 30/33 -> 31/34.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_task_self_multi.py",
+    "/app/backend/tests/test_task_sharing.py",
+    "/app/backend/tests/test_task_scope.py",
+    "/app/test_reports/pytest/self_multi.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "MultiAssigneeSelect.jsx is well-scoped (~148 LOC). Good use of memo + testids. Consider adding keyboard navigation (Up/Down/Enter) to the option list for accessibility — currently mouse/click only.",
+    "The 'Kendim' option is injected client-side because /team/members excludes self; documenting this via comment is done, but a small unit test on the ordering (self always first) would harden against future regressions.",
+    "TasksPanel.jsx is still ~2735 lines. Extracting the add-task form + routing decision (self-only / single / multi) into its own file would improve maintainability.",
+    "The success toast 'Görev 2 kişiye atandı (siz dahil)' is user-friendly — nice touch."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_task_self_multi.py"
+  ],
+  "success_rate": {"backend": "100% (20/20: 3 self-multi + 7 sharing + 10 scope)", "frontend": "100% (picker panel, search filter, self+staff selection, task creation, per-assignee checkboxes)"},
+  "test_credentials": "serkan/19071987 (admin), mgr_test/mgr12345, emp1_test/emp12345 (see /app/memory/test_credentials.md).",
+  "seed_data_creation": "Backend tests create MA_TEST_*/SH_TEST_*/SELFMULTI_TEST_* tasks and delete them in the finally block. UI test task SELFMULTI_UI_* was deleted via API after verification. No residue.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "pytest MUST be run serial (-n 0) with REACT_APP_BACKEND_URL exported (parallel produces spurious 401s). Login response uses 'token' key. No /api/me endpoint — use /auth/me. 'YENİ GÖREV' button text is uppercase; testid task-add-new may not always resolve — get_by_text('YENİ GÖREV') works. Overdue-alert modal blocks initial clicks; dismiss with [data-testid=overdue-alert-close]. Multi-assignee picker testids: task-multi-assignee, assignee-picker-toggle, assignee-picker-panel, assignee-search, assignee-option-list, assignee-option-{id}, assignee-selected-chips, assignee-chip-{id}, assignee-chip-remove-{id}. Note: assignee-option-list container also matches the ^= selector — filter it out.",
+  "detailed_verification": {
+    "backend_self_included": "POST /api/tasks with assignee_user_ids=[admin_id, emp_id] returns 200 with assignees array containing BOTH admin and emp (completed=false), status != 'done'. Task appears in creator scope=mine. Creator my-completion toggles self; task becomes 'done' only after ALL assignees complete. ✓",
+    "backend_only_self_multi": "POST with assignee_user_ids=[admin_id] alone creates task where creator is the sole assignee; my-completion=true marks it done. ✓",
+    "backend_legacy_single": "POST with assignee_user_id=emp_id (legacy field) still works — emp sees task in list. ✓",
+    "frontend_picker_structure": "assignee-picker-toggle opens/closes assignee-picker-panel. Panel contains assignee-search (input) and assignee-option-list (scrollable, max-h-48 overflow-y-auto). First option is assignee-option-{creator_id} with label 'Kendim (ben de dahilim)'. ✓",
+    "frontend_search_filter": "Typing 'emp1' in assignee-search filters visible options to only emp1_test. Clearing shows all. ✓",
+    "frontend_chips": "Selecting Kendim + emp1_test produces 2 chips in assignee-selected-chips (data-testid=assignee-chip-{id}). × button (assignee-chip-remove-{id}) removes each. ✓",
+    "frontend_submit": "Task created with title SELFMULTI_UI_*, toast 'Görev 2 kişiye atandı (siz dahil)' shown, task card has 2 per-assignee checkboxes (data-testid=assignee-check-*), counter incremented. ✓"
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "summary": "Tested workspace_mode + dual_mode e2e (backend + web frontend). Backend endpoints (PUT /api/settings/workspace-mode, PUT /api/settings/dual-mode) persist correctly and /auth/me reflects the values for both serkan (is_owner=true) and mgr_test (is_owner=false, role=manager). Owner immunity is FULLY working: serkan in personal mode still sees Sidebar tab-team/tab-orphans and all team-only Settings tabs (users, errorradar, companies, licenses, visibility, announcements, roles, monitoring). Settings 'Mod' tab controls (workspace-dual-toggle, workspace-mode-personal, workspace-mode-team cards) all work and call the backend. The quick-mode-switch button in NEURAL LINK header appears when dual_mode=true, toggles the label KİŞİSEL⇄EKİP, and persists to backend. HOWEVER, a HIGH PRIORITY UI bug was found: the Sidebar's `tabOrder` state is only initialized on mount and never re-syncs when `teamFeaturesVisible` (canSeeTeam) flips at runtime. As a result, for non-owner managers (mgr_test) the quick-mode-switch does NOT dynamically show/hide the Ekibim + Yarım Kalan sidebar tabs — a page reload is required. This defeats the intended UX of the Çift Mod quick-switch. Backend tests: 3/3 pass. Frontend tests: 1/2 flows pass fully (serkan pass, mgr_test in-place switch fails; state-after-reload works).",
+  "platforms_tested": ["web"],
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "web": {
+      "ui_bugs": [
+        {
+          "component": "Sidebar / SidebarTabBar",
+          "issue": "Sidebar `tabOrder` state is derived once (useState initializer) from DEFAULT_ORDER which depends on `canSeeTeam`. There is NO useEffect syncing tabOrder when canSeeTeam/teamFeaturesVisible flips at runtime. Also SidebarTabBar renders `tabOrder.map(...)` without a `canSeeTab` filter. Result: (a) non-owner manager in personal mode who flips to team via quick-mode-switch does NOT get tab-team / tab-orphans until page reload; (b) reverse direction (team→personal via quick-switch) leaves the two tabs still visible until reload. Reference: /app/frontend/src/components/Sidebar.jsx:114 (useState init), :101-113 (DEFAULT_ORDER), :747 (tabOrder passed to SidebarTabBar); /app/frontend/src/components/sidebar/SidebarTabBar.jsx:173 (renders tabOrder without canSeeTab filter).",
+          "selector": "[data-testid='tab-team'], [data-testid='tab-orphans'], [data-testid='quick-mode-switch']",
+          "priority": "HIGH"
+        }
+      ],
+      "integration_issues": [],
+      "design_issues": []
+    },
+    "mobile": {"ui_bugs": [], "integration_issues": [], "design_issues": [], "react_native_issues": []}
+  },
+  "parity_issues": [],
+  "test_report_links": [
+    "/app/backend/tests/test_workspace_dual_mode.py",
+    "/app/test_reports/pytest/iter125_workspace_dual.xml"
+  ],
+  "action_items": [
+    "Fix Sidebar.jsx to re-sync tabOrder when canSeeTeam/teamFeaturesVisible changes. Two options: (1) Add a useEffect that when canSeeTeam changes, injects/removes 'team' and 'orphans' entries from tabOrder (and persists) — preserving user's manual ordering. (2) Filter the rendered tab list through canSeeTab: change SidebarTabBar.jsx line 173 to `tabOrder.filter(canSeeTab).map(...)` AND ensure tabOrder is a superset that always includes team/orphans for manager+ (so hiding via canSeeTab handles the mode switch). Option (2) is smaller and safer. The same applies to activeFloatingKeys logic (already filters by canSeeTab at Sidebar.jsx:637 — good), just missing at the visible-tab-list level.",
+    "Consider also: when the active `tab` is 'team'/'orphans' and canSeeTab becomes false, Sidebar.jsx:96-99 falls back to 'history' — good, keep."
+  ],
+  "critical_code_review_comments": [
+    "Sidebar.jsx: tabOrder is duplicated state (localStorage + useState) that isn't reactive to canSeeTeam. Consider deriving visible tabs directly from a computed value or forcing re-init on canSeeTeam change.",
+    "SidebarTabBar.jsx line 173 lacks the canSeeTab guard already applied elsewhere in Sidebar.jsx (line 637 for floating tabs, line 572 for tab activation). Guard is inconsistent."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_workspace_dual_mode.py (new)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "83%"},
+  "test_credentials": "serkan/19071987 (owner, super_admin), mgr_test/mgr12345 (non-owner, manager, Test Company A)",
+  "seed_data_creation": "None. Test states restored: serkan → workspace_mode=personal + dual_mode=true; mgr_test → workspace_mode=personal + dual_mode=false.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend endpoints for dual-mode + workspace-mode are correct and persist. Owner immunity (is_owner=true) works everywhere in the UI. The remaining bug is client-side only: Sidebar tabOrder does not react to teamFeaturesVisible changes, so in-place mode switching via the quick-mode-switch button in NeuralLinkHeader is broken for non-owner managers/admins. Fix path is small (see action_items). serkan is left in personal + dual=true so the quick-switch button is visible when logging in.",
+  "rca of the issue": "In Sidebar.jsx, DEFAULT_ORDER is IIFE-computed from `canSeeTeam` at render, but `tabOrder` is stored in useState and only reads the initializer once (or from localStorage). No effect resynchronizes tabOrder when canSeeTeam flips. SidebarTabBar.jsx renders `tabOrder.map(...)` directly (line 173) with no canSeeTab filter, so the render depends entirely on the stale tabOrder. Reproduction: (1) Login as mgr_test; (2) Set workspace_mode=personal, dual_mode=true, reload; (3) Click quick-mode-switch (personal→team); (4) Expect tab-team and tab-orphans to appear in sidebar — actually they don't. Reloading page reveals the tabs because DEFAULT_ORDER is recomputed with canSeeTeam=true. Mitigation: filter tabOrder by canSeeTab at render, and pre-seed tabOrder to always include team/orphans for isManagerOrAdmin users so filtering hides/shows dynamically."
+}

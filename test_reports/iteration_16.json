@@ -1,0 +1,29 @@
+{
+  "summary": "Faz 0 (Long-Term Memory + Whisper STT) end-to-end verified. Backend: 14/14 pytest cases pass in /app/backend/tests/test_memory_and_stt.py covering memory CRUD, manual/forget chat triggers, prompt injection, auto-extraction background task, and Whisper TTS→STT round-trip. Frontend: Login (serkan/19071987) works, 4-tab sidebar (GEÇMİŞ/GÖREVLER/HAFIZA/NOTLAR) renders correctly with new Brain icon tab, MemoryPanel CRUD (add/edit/delete/bulk-delete/filter chips) all functional, manual 'Bunu hatırla:' + 'unut' triggers verified through the actual chat UI (Sertex responded 'Tamam efendim, hafızama kaydettim' and 'ile ilgili 1 hafıza kaydını sildim' in Turkish), send-button + Enter both submit correctly. Mic 'W' badge correctly hidden in Chromium (Web Speech present). Tasks/Notes tabs regression-checked. No blocking issues found.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_memory_and_stt.py",
+    "/app/test_reports/pytest/memory_stt_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "memory_service.list_memories does three sort() calls back-to-back (lines 262-264); only the last sort takes effect. Consider replacing with a single sort key tuple: docs.sort(key=lambda d:(-(d.get('importance') or 0), d.get('updated_at') or ''), reverse=False). Not blocking — end result is close enough — but wasteful.",
+    "server.py near-duplicate check inside save_memory pulls up to 500 existing docs into memory on every write — will not scale beyond a few hundred memories per user. Recommend switching to a MongoDB text index or a smaller candidate set (top-N most recent).",
+    "Whisper /api/stt/whisper: no size validation on multipart before reading into memory (transcribe_audio checks 25MB but only after audio.read() completes). Consider streaming or Content-Length preflight to reject oversized uploads early."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_memory_and_stt.py (new)"
+  ],
+  "success_rate": {"backend": "100% (14/14 pytest)", "frontend": "100% (memory CRUD + chat triggers + regression)"},
+  "test_credentials": "serkan / 19071987",
+  "seed_data_creation": "Test data (TEST_* memories and 'UI test manual memory 42') created during runs was cleaned up at end of module and via post-test cleanup call.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Faz 0 fully verified. Backend test module test_memory_and_stt.py is idempotent (module-scope memory wipe fixture). Whisper endpoint validated with real TTS-generated MP3 (voice='onyx', 'Merhaba efendim, bu bir test kaydıdır.') — Whisper transcribed correctly. Manual trigger short-circuits LLM (~2s vs 5-10s for real chat). Auto-extraction BackgroundTask completes in 3-6s for the test message 'Ben makine mühendisiyim ve iki köpeğim var'. UI note: send-button click occasionally exhibited a race in a prior test run (input not cleared); could not reproduce on retry — likely was due to pending page.on('dialog') handler blocking. Enter key submit is 100% reliable.",
+  "rca of the issue": "No blocking issues to root-cause."
+}

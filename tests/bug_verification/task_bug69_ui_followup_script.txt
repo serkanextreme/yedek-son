@@ -1,0 +1,1 @@
+Browser follow-up script for bug69: verify archive/unarchive toast timing with a DOM MutationObserver under a delayed PATCH route, and spot-check task create/status/reminder/edit regressions via UI/API. Executed via mcp_browser_automation because Playwright Python is not installed in the container.

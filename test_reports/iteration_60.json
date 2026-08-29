@@ -1,0 +1,26 @@
+{
+  "summary": "Faz 9 CP4.27 — Görev Kilit + Tek-kullanımlık Unlock OTP e2e testing. Backend: 13/13 new lock+OTP tests PASS + 35/35 regression tests PASS (test_tasks.py, test_task_reassign.py, test_task_categories.py). Frontend UI: Context menu 'Kilit Ayarları' item, lock-config modal with all 13 flag checkboxes + set-all/clear-all/save, lock badge on task card, OTP display modal with 6-digit code + copy button — all verified working via Playwright on preview URL.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_tasks_locks.py",
+    "/app/test_reports/pytest/lock_otp_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "TasksPanel.jsx is now >3100 lines — should be split into smaller modules (LockConfigModal / OtpDisplayModal / UnlockOtpModal / TaskCard / ContextMenu). Growing complexity risk.",
+    "OTP verify endpoint sets unlock_uses_remaining=1 with a 10-min TTL; if the assignee performs a DELETE, the task is gone and _consume_unlock_session is intentionally skipped — good. But for PATCH that triggers multiple locked actions in one payload (e.g. title + due_date), the current _consume_unlock_session decrements only once. That is consistent with 'single-use == single request' semantics, worth documenting.",
+    "issue_unlock_otp Notification import (team_service) is inside try/except — silent failure. Consider logging so notification bugs don't stay invisible.",
+    "task_unlock_otps collection: consider a TTL index on expires_at for automatic cleanup instead of relying on invalidated_at markers."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_tasks_locks.py (new)"
+  ],
+  "success_rate": {"backend": "100% (48/48)", "frontend": "100% (all requested UI elements verified)"},
+  "test_credentials": "admin: serkan/19071987 ; employee: ahmet/ahmet123",
+  "seed_data_creation": "Test tasks created dynamically via API in tests and playwright; all TEST_* prefixed tasks cleaned up after runs (17 stragglers deleted at end).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Task field names to remember: creation uses 'assignee_user_id' (NOT 'assignee_id'); reassign uses 'new_owner_user_id'. Lock endpoints: PATCH /tasks/{id}/locks (body {lock_flags}), POST /tasks/{id}/unlock-otp (returns {code, expires_at, ttl_minutes}), POST /tasks/{id}/unlock-verify (body {code}). 423 = 'Locked'. Frontend task card testid pattern is 'task-item-{id}' (not task-card-). Lock testids exactly per spec: ctx-lock-config, lock-config-modal, lock-flag-<key>, lock-set-all, lock-clear-all, lock-config-save, task-lock-badge-{id}, ctx-lock-issue-otp, otp-display-modal, otp-code, otp-copy.",
+  "rca of the issue": "n/a — no defects. All spec items 1–14 verified. Backend enforces RBAC correctly (403 for non-privileged setLocks, 423 for locked assignee actions, 400 for wrong/used OTP, 403 for non-assignee verify, admin & creator bypass). Reissuing OTP invalidates previous. Single-use window enforced (second locked mutation after one bypass returns 423)."
+}

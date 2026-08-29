@@ -1,0 +1,31 @@
+{
+  "summary": "Verified Faz 9 CP5 'Devret' two-mode flow (Kişiye + Şirkete). Backend pytest: 3/3 passed — GET /api/task-transfer-companies (admin lists all), POST /api/tasks/{tid}/transfer-company (sets user_id=null, assignees=[], company_id/name=target, orphaned=true, orphaned_from_company_id=target, category_id unset, prev_assignee_* populated; task appears in /api/orphan-tasks), and RBAC 403 for manager transferring to a foreign company. Frontend: ReassignModal renders both mode buttons (reassign-mode-user + reassign-mode-company), KİŞİYE DEVRET body groups members by company (Test Company A: mgr_test/emp1_test; ŞİRKETSİZ: ahmet) with reassign-pick-{username} buttons, ŞİRKETE DEVRET body shows info banner + reassign-company-select (52 options for admin) + reassign-company-submit. End-to-end Şirkete Devret via UI succeeded — success toast 'Görev Test Company A devredildi — Yarım Kalan İşler havuzunda' appeared, task became orphan+kolsuz and entered /api/orphan-tasks. Reclaim via /api/tasks/{id}/reassign (new_owner_user_id) works to restore ownership.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_transfer_company.py",
+    "/app/test_reports/pytest/transfer_company.xml"
+  ],
+  "action_items": [
+    "SPEC-only mismatch (not a bug): Review request referenced testids task-card-{id}, task-kebab-{id}, task-action-reassign. Actual code uses task-item-{id}, task-menu-{id}, ctx-reassign. If unification is desired, add task-card-{id}/task-kebab-{id} aliases; otherwise update the spec to reflect current testids.",
+    "Nice-to-have: Company transfer clears category_id (kolsuz) by design; when an orphan is reclaimed via /reassign, category_id stays null. This is expected per spec but worth flagging so UI can prompt the reclaiming user to pick an iş kolu."
+  ],
+  "critical_code_review_comments": [
+    "tasks_router.py transfer_task_to_company: RBAC gate correctly enforces can_view_company for target; 403 message localized ('Bu şirkete devretme yetkiniz yok'). Verified.",
+    "ReassignModal.jsx cleanly separates modes with lazy company fetch on mode switch — good pattern.",
+    "Test spec drift: testids in review request (task-card, task-kebab, task-action-reassign) don't match implementation. Consider aligning naming or adding backward-compatible aliases."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_transfer_company.py"
+  ],
+  "success_rate": { "backend": "100%", "frontend": "100%" },
+  "test_credentials": "serkan/19071987 (admin), mgr_test/mgr12345 (manager, Test Company A), emp1_test/emp12345 (employee)",
+  "seed_data_creation": "Transiently transferred existing team task 'TEST_CP3 overdue' (id e5e6ba03-0800-4f42-b50d-92929a582364) to Test Company A via UI, then reclaimed back to original owner emp1_test via API. NOTE: category_id remained null after reclaim (intentional 'kolsuz' side-effect of the transfer flow). Backend pytest task was created & cleaned up. No leftover test tasks.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Actual task-list testids: task-item-{id} (card), task-menu-{id} (kebab), ctx-reassign (Devret action). LS token key: sertex_token_v1 (raw JWT, no wrapper). Devret menu is gated by isTeamView=true — must switch to 'PERSONEL GÖREVLERI' tab before opening the kebab. POST /api/tasks does not honor user_id in body; use POST /api/tasks/{id}/reassign with body {new_owner_user_id: '...'} to change owner. Login page uses [data-testid=login-username|login-password|login-submit]."
+}

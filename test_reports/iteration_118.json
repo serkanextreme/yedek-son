@@ -1,0 +1,38 @@
+{
+  "summary": "Wave 3 mobile Settings + Admin panels (frontend-only, Expo web preview @ 414x896). Login (serkan) OK. Profile→Ayarlar→/settings OK (SETTINGS.open + settings-screen render). Digest settings: hour increment + detailed toggle saved and PERSISTED (button flipped to '✓ KAYDEDİLDİ'; after reload hour shown as 10:00). ADMIN CRUDs run: USERS create+edit(role→manager)+delete of temp 'zztest_cl3j2' OK; temp-password banner 'Geçici şifre: VyNJj5orxd' shown as expected. COMPANIES create+rename(' v2')+delete of temp 'ZZ Test Co ...' OK. LICENSES generate 1 monthly OK (banner '1 lisans üretildi'), delete generated OK. PERMISSIONS: form opens, options selectable (2 manager opts = serkan+mgr_test), EKLE clicked but mapping mgr_test→ahmet already existed in seed (67 pre-existing), so no new item was added and no form error surfaced — needs verification whether backend returned 200/409 silently. ANNOUNCEMENTS: create OK (item visible), but DELETE flow did not remove the row from the list (item still present after confirm-ok + refresh) — POSSIBLE BUG (backend may soft-delete/is_active=false but screen still lists them; UI has no filter). Back button (settings-back) works when navigated via stack; when opened via direct deep-link, Expo Router logs 'GO_BACK not handled' (expected in dev preview). No red-screen crashes; only web-only warnings (deprecated shadow*/pointerEvents). Screen has 2 settings-back nodes in DOM at once because previous stack screens remain mounted — mitigated by clicking the last one.",
+  "platforms_tested": ["mobile"],
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "web": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+    "mobile": {
+      "ui_bugs": [
+        {"component": "AnnouncementsScreen", "issue": "After deleting a freshly created announcement via admin-ann-delete-<id> + confirm-ok, the row remains visible in the list (load('refresh') runs but item still returned by GET /api/announcements). If backend does soft-delete (is_active=false), screen should filter it out or refetch active-only. If backend hard-deletes, list state is stale.", "testID": "admin-ann-item-<id>", "priority": "HIGH"},
+        {"component": "PermissionsScreen", "issue": "Creating an existing mapping (mgr_test→ahmet already seeded) produced no user-facing feedback: no formError set and no new row diff. Either add duplicate detection (409 handling) or refresh the list to surface state. Not blocking.", "testID": "admin-mv-add", "priority": "LOW"}
+      ],
+      "integration_issues": [],
+      "design_issues": [
+        {"screen": "All /settings/* sub-screens", "issues": ["ScreenHeader with testID='settings-back' remains mounted (2 DOM instances) after navigating between admin panels because Expo Router keeps stacked screens; Playwright strict/first-match becomes non-visible. Consider unmounting hidden stack screens or narrowing the testID with the current screen name."]}
+      ],
+      "react_native_issues": []
+    }
+  },
+  "parity_issues": [],
+  "test_report_links": ["/app/tests/mobile_wave3_settings.py"],
+  "action_items": [
+    "Fix AnnouncementsScreen delete UX: after successful DELETE /api/announcements/{id}, ensure the deleted row is removed from the visible list (either filter is_active !== false, or hard-delete server-side, or optimistically drop from local state).",
+    "PermissionsScreen: surface duplicate/existing mapping response (currently silent) — show a toast or formError when POST /api/manager-visibility returns non-2xx or when the row is not appended.",
+    "Consider making testID='settings-back' unique per screen or ensuring only the top-of-stack ScreenHeader is mounted, to make Playwright/E2E scripts less brittle."
+  ],
+  "critical_code_review_comments": [
+    "announcements.tsx delete handler catches error silently (no formError/banner set) — hides API failures from user.",
+    "settings/*.tsx all use ScreenHeader with same testID 'settings-back' — DOM contains duplicates while stack keeps prior screens.",
+    "users.tsx: edit save sends company_id: '' when unset; ensure backend interprets '' as clearing membership (comment says so, verify)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a", "frontend": "85%"},
+  "seed_data_creation": "Created and cleaned up: temp user zztest_cl3j2 (deleted), temp company 'ZZ Test Co cl3j2 v2' (deleted), 1 generated monthly license (deleted). Temp announcement 'ZZ Ann <rand>' was created but DELETE did not visually remove it — main agent should verify DB state and either purge remaining ZZ Ann rows or fix the UI (see action_items).",
+  "test_credentials": "serkan / 19071987",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Login as serkan and navigate to /settings/announcements to verify the delete flow. There may be a leftover 'ZZ Ann <rand>' announcement from this iteration; clean it up. The mgr_test→ahmet manager-visibility mapping already exists in seed data, so any new-mapping test must pick a different (mgr,emp) pair. Session-kicked: running fresh browser sessions invalidates previous serkan tokens (401)."
+}

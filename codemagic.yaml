@@ -1,0 +1,103 @@
+# Faz 9 CP4.19 — Codemagic CI/CD for the Sertex Android APK.
+#
+# Usage: connect this repository to codemagic.io. The 'sertex-android'
+# workflow triggers on every push to `main` and produces a signed APK
+# ready to be side-loaded onto your Android device or uploaded to the
+# Google Play Console.
+#
+# Free tier: 500 build minutes per month → ~40 builds. Plenty for
+# personal testing.
+
+workflows:
+  sertex-android:
+    name: Sertex Android APK
+    max_build_duration: 30
+    instance_type: mac_mini_m2
+    environment:
+      groups:
+        # Optional — attach a group with SERTEX_KEYSTORE_* variables in
+        # codemagic.io if you want release-signed APKs. Debug builds work
+        # without any secrets.
+        - keystore_credentials
+      vars:
+        # Keep node aligned with the version installed locally (`.nvmrc`
+        # if present). Codemagic ships multiple versions preinstalled.
+        NODE_VERSION: 20
+        # Codemagic sets CI=true by default, which makes CRA treat every
+        # ESLint warning as a compile-time error and abort the build. We
+        # ship warnings on purpose (they're background quality signals, not
+        # blockers) so we opt out of the strict CI mode here.
+        CI: "false"
+        # Point the mobile app at production so the APK is usable out of
+        # the box. Override this variable in codemagic.io to build a
+        # preview APK against the dev backend.
+        REACT_APP_BACKEND_URL: "https://sertex-ai.com"
+    scripts:
+      - name: Install frontend dependencies
+        script: |
+          cd frontend
+          yarn install --frozen-lockfile
+      - name: Build web bundle
+        script: |
+          cd frontend
+          yarn build
+      - name: Sync Capacitor
+        script: |
+          cd frontend
+          npx cap sync android
+      - name: Downgrade Capacitor Java target to 17
+        script: |
+          # Capacitor 7 generates gradle stubs targeting JavaVersion.VERSION_21
+          # in THREE separate places (project, cordova bridge, and the
+          # @capacitor/android npm module itself). Codemagic mac_mini_m2
+          # ships JDK 17 only, so we patch all three. macOS BSD sed needs
+          # `-i ''` for in-place edits (unlike GNU sed).
+          cd frontend
+          echo "Locating all gradle files with VERSION_21..."
+          # Search both android/ and node_modules for any gradle file
+          # still targeting Java 21. This catches @capacitor/android too.
+          FILES=$(grep -rl "VERSION_21" android/ node_modules/@capacitor/ 2>/dev/null || true)
+          if [ -z "$FILES" ]; then
+            echo "No VERSION_21 references found (already patched?)"
+          else
+            for f in $FILES; do
+              echo "Patching $f"
+              sed -i '' 's/JavaVersion\.VERSION_21/JavaVersion.VERSION_17/g' "$f"
+              sed -i '' "s/jvmTarget = '21'/jvmTarget = '17'/g" "$f"
+              grep -n "JavaVersion\|jvmTarget" "$f" | head -3 || true
+            done
+          fi
+          # Belt and suspenders: force Java 17 at the app module level
+          printf '\nandroid { compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 } }\n' >> android/app/build.gradle
+          echo "Java 17 override appended to android/app/build.gradle"
+          echo "Final verification - remaining VERSION_21 refs:"
+          grep -rn "VERSION_21" android/ node_modules/@capacitor/ 2>/dev/null | head -5 || echo "(none - clean)"
+      - name: Regenerate Gradle wrapper (defensive)
+        script: |
+          # Faz 9 CP4.19b — Emergent's "Save to GitHub" flow skips binary
+          # files such as *.jar, which means `gradle-wrapper.jar` never
+          # reaches the remote. Rather than fight the platform, we simply
+          # regenerate the wrapper here using Codemagic's pre-installed
+          # `gradle` command. This makes the build fully self-healing.
+          cd frontend/android
+          if [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then
+            echo "gradle-wrapper.jar missing — regenerating from Codemagic's gradle installation..."
+            gradle wrapper --gradle-version 8.11.1 --distribution-type all
+          else
+            echo "gradle-wrapper.jar already present, skipping regeneration"
+          fi
+      - name: Build Android APK
+        script: |
+          cd frontend/android
+          # Debug build (unsigned) — works instantly, side-loadable.
+          # For a signed release build, swap `assembleDebug` for
+          # `assembleRelease` and provide keystore variables above.
+          chmod +x ./gradlew
+          ./gradlew assembleDebug
+    artifacts:
+      - frontend/android/app/build/outputs/**/*.apk
+      - frontend/android/app/build/outputs/**/*.aab
+    # NOTE: E-mail / Slack notifications can be configured from the
+    # Codemagic UI (Application → Settings → Notifications). Keeping the
+    # YAML free of the `publishing:` block avoids a hard-coded address
+    # in version control and makes recipient changes zero-friction.

@@ -1,0 +1,37 @@
+{
+  "summary": "Smoke test after credential rotation to serkan/19071987. Backend fully passes: new creds return 200+JWT, old creds sertex/sertex2026 return 401, /api/auth/me returns username=serkan, login_attempts collection empty. Frontend login flow with new creds succeeds and main app loads with token persisted. HOWEVER, the LoginScreen hint text was NOT updated as claimed in the review request — it still literally reads 'İLK ŞİFRE: sertex / sertex2026 — giriş sonrası değiştirin' (line 173 of LoginScreen.jsx), which continues to leak the OLD credentials on-screen and does not show the requested 'KİMLİK: SERKAN · SERTEX v1.0' text. /app/memory/test_credentials.md is also stale (still documents sertex/sertex2026 as default).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "LoginScreen.jsx (line 173)",
+        "issue": "Credential hint below the login card still displays the OLD credentials: 'İLK ŞİFRE: sertex / sertex2026 — giriş sonrası değiştirin'. Main agent said this was updated to 'KİMLİK: SERKAN · SERTEX v1.0' but the file was never modified. Old creds are still leaked verbatim to any user viewing the login page.",
+        "selector": "[data-testid='login-card'] > div.mt-3",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Update /app/frontend/src/components/LoginScreen.jsx line 172-174: replace the 'İLK ŞİFRE: sertex / sertex2026 — giriş sonrası değiştirin' block with the intended hint (e.g. 'KİMLİK: SERKAN · SERTEX v1.0') so old credentials are no longer displayed on the login screen.",
+    "Update /app/memory/test_credentials.md to reflect new default credentials (username=serkan, password=19071987) so future testing agents don't use the wrong creds."
+  ],
+  "critical_code_review_comments": [
+    "auth.py seed_initial_user: correctly re-seeds password when env INITIAL_PASSWORD changes AND password_user_set flag is not set — that's how the credential rotation took effect here (verified: user 'sertex' was removed by main agent, new user 'serkan' seeded from env). Behavior is correct.",
+    "Login-attempts lockout is keyed on username only (comment in auth.py explains: k8s ingress rotates client IP across pod replicas). Reasonable trade-off for a single-user app. Old failed attempts against 'sertex' username became orphaned after user removal — recommended to clear login_attempts as part of any future credential rotation script (already done manually here).",
+    "SECURITY: Displaying default creds directly in the login-screen UI (even the new ones) is not ideal for a personal assistant — consider removing the hint entirely or making it configurable/hidden after first successful login."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (3/3 checks)", "frontend": "80% (4/5 checks — hint-text check failed)"},
+  "test_credentials": "username=serkan, password=19071987",
+  "seed_data_creation": "None. Cleared db.login_attempts (was already empty).",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend credential rotation is verified working. Main outstanding item is the LoginScreen hint text (line 172-174 of LoginScreen.jsx) still leaking OLD credentials — main agent needs to actually modify that JSX and update /app/memory/test_credentials.md. Once fixed, a quick re-run of the frontend playwright check (verify 'sertex2026' string is NOT present in the login-card innerText) is enough to close this out.",
+  "rca of the issue": "Main agent rotated backend credentials correctly (env vars + DB reseed + lockout clear) but the claim of 'updated login screen hint text' was not carried out — LoginScreen.jsx line 173 still contains the literal string 'sertex / sertex2026'. This is a straightforward oversight, not a technical failure. Fix: edit that JSX line."
+}

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="hex" x1="0" y1="0" x2="1024" y2="1024" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#38f0ff"/>
+      <stop offset="1" stop-color="#0aa9c0"/>
+    </linearGradient>
+  </defs>
+  <polygon points="512,220 800,400 800,624 512,804 224,624 224,400" fill="none" stroke="url(#hex)" stroke-width="30"/>
+  <circle cx="512" cy="512" r="80" fill="url(#hex)"/>
+  <text x="512" y="552" font-family="Courier New, monospace" font-size="110" font-weight="900" fill="#0b1220" text-anchor="middle">S</text>
+</svg>

@@ -1,0 +1,19 @@
+{
+  "summary": "Verified themed in-app dissolve-confirmation modal for group unlink. Created a 2-task group via BAĞLA/LinkTasksModal, opened dissolve via group-dissolve-{gid}, confirmed themed modal (title 'BAĞLANTIYI ÇÖZ', group name shown, 'Görevler silinmez, sadece bağlantıları kaldırılır.' text present). VAZGEÇ closes modal and keeps group intact. ÇÖZ dissolves group (block disappears, tasks return as individual cards) and shows toast 'Grup bağlantısı çözüldü'. No native browser confirm dialog was triggered at any point (a dialog listener was attached and never fired). Regression: group creation via link-tasks-toolbar-btn works, group block renders with progress badge (0/2 TAMAMLANDI).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (skipped)", "frontend": "100%"},
+  "test_credentials": "serkan / 19071987",
+  "seed_data_creation": "Created a temporary group 'TEST_DISSOLVE_GROUP' with 2 tasks; group was dissolved during ÇÖZ test so no residual group remains. Tasks themselves were pre-existing (BUG69_UI_d7510a4e_TASK_*) and were not modified.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Themed dissolve modal fully verified. LinkTasksModal opens 32 selectable tasks in current Benim Görevlerim view. Note that when clicking dissolve, page.on('dialog') listener was armed and NEVER triggered, confirming window.confirm was fully replaced. Detach/dock regression items in the request were not explicitly re-tested this iteration but were passing in iteration_82; only the confirm modal path changed."
+}

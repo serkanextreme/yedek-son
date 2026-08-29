@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Sertex hexagonal HUD icon — dark cyan / neon accent -->
+  <defs>
+    <radialGradient id="g" cx="512" cy="512" r="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0e2440"/>
+      <stop offset="1" stop-color="#040b16"/>
+    </radialGradient>
+    <linearGradient id="hex" x1="0" y1="0" x2="1024" y2="1024" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#38f0ff"/>
+      <stop offset="1" stop-color="#0aa9c0"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#g)"/>
+  <!-- Outer hexagon -->
+  <polygon points="512,120 850,320 850,704 512,904 174,704 174,320" fill="none" stroke="url(#hex)" stroke-width="20"/>
+  <!-- Inner hexagon -->
+  <polygon points="512,260 720,378 720,646 512,764 304,646 304,378" fill="none" stroke="url(#hex)" stroke-width="8" opacity="0.55"/>
+  <!-- Center orb -->
+  <circle cx="512" cy="512" r="140" fill="url(#hex)" opacity="0.15"/>
+  <circle cx="512" cy="512" r="90" fill="url(#hex)" opacity="0.4"/>
+  <circle cx="512" cy="512" r="42" fill="#38f0ff"/>
+  <!-- Sertex "S" mark -->
+  <text x="512" y="562" font-family="Courier New, monospace" font-size="120" font-weight="900" fill="#0b1220" text-anchor="middle">S</text>
+</svg>

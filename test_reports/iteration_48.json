@@ -1,0 +1,37 @@
+{
+  "verdict": "fixed",
+  "user_reported_bug": "AYARLAR modal'da tab bar taşıyor — screenshot'ta 'YETKILER' sekmesi ekrandan (modal genişliğinden) taşıyor, tab'lar tek satıra sığmıyor. Kullanıcı ekli screenshot ile bildirdi: '[RENKLER TEMALAR ALARM HESAP MOD KULLANICILAR LISANSLAR ŞIRKETLER YETKILER]' 9 sekme yatayda hizalanmış ve YETKILER modal'ın sağ kenarını aşarak overflow yapıyor.",
+  "summary": "No relevant testing skill found. Focused UI verification passed: SettingsPanel.jsx now uses data-testid='settings-tabs' with flex flex-wrap; admin serkan sees all 9 tabs and none overflow modal/tab bounds at 1920px or 768px viewport (they wrap into 2 rows); all 9 admin tabs open their expected content and active neon/border indicator remains. Employee ahmet still hides admin-only users/licenses/companies/visibility tabs and non-admin tabs do not overflow.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/settings_tabs_overflow_verification.py",
+    "/root/.emergent/automation_output/20260724_193747/console_20260724_193747.log"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Code review confirmed the narrow fix is limited to SettingsPanel.jsx tab container: className changed from 'flex border-b...' to 'flex flex-wrap border-b...' and data-testid='settings-tabs' was added. No tab buttons/content routing were altered.",
+    "Note: employee ahmet currently also shows settings-tab-mylicense/Lisansım in addition to the five tabs listed in the review request. This appears to be existing product behavior from SettingsPanel.jsx lines 353-366, not introduced by this overflow fix; admin-only tabs are correctly hidden."
+  ],
+  "updated_files": [
+    "/app/test_reports/settings_tabs_overflow_verification.py",
+    "/app/test_reports/bug_verification_48.json",
+    "/app/test_reports/iteration_48.json"
+  ],
+  "success_rate": {
+    "backend": "n/a (frontend-only bug)",
+    "frontend": "100%"
+  },
+  "seed_data_creation": "None.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Use serkan/19071987 and ahmet/ahmet123. Overdue alert may appear after login; dismiss [data-testid=overdue-alert-close] before opening Settings. Final Playwright evidence from mcp_browser_automation RUN3: admin desktop/tablet measurements show settings-tabs class 'flex flex-wrap...' and settings-tab-visibility inside bounds; employee hides admin-only tabs.",
+  "rca_of_the_issue": "Reproduced target flow after fix: admin login → Ayarlar → 9-tab bar. Direct DOM measurements show YETKILER right edge equals tabs/modal right boundary and does not exceed it; ŞIRKETLER/YETKILER wrap to the second row. Regression checks clicked every admin tab and validated content selectors plus active neon-glow/border classes. Initial local script could not run because the container lacks the Python playwright package, so the same logic was executed through mcp_browser_automation. Console log contains request aborts caused by intentional navigation/logout during test and a non-blocking WebGL context-lost warning; they did not affect the verified Settings flow."
+}

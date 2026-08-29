@@ -1,0 +1,48 @@
+{
+  "summary": "FAZ B2 wave-1 Task Attachments (mobile) — BLOCKING BUG found on Expo web preview. Empty state, chooser modal (Kamera/Galeri/Dosya) and '+ Ekle' entry-point (task-detail-attach-add) all render correctly; Devret regression still passes. BUT the actual upload fails on WEB for BOTH 'Galeri' and 'Dosya' with backend 422: {\"detail\":[{\"type\":\"value_error\",\"loc\":[\"body\",\"chunk\"],\"msg\":\"Value error, Expected UploadFile, received: <class 'str'>\"}]}. RCA: /app/mobile/src/api/client.ts uploadAttachment() appends the file part as the RN-only shape { uri, name, type } — on the web preview browser FormData serializes this plain object to the literal string \"[object Object]\", so the multipart 'chunk' field arrives as a string, not an UploadFile. This blocks list/thumbnail/preview/delete flows on web because no upload can ever succeed. Also raw JSON error body is shown to the user verbatim (minor UX).",
+  "platforms_tested": ["mobile"],
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "mobile": {
+      "ui_bugs": [
+        {"component": "AttachmentsSection error banner", "issue": "Raw JSON error body ({\"detail\":[{...}]}) rendered verbatim to user instead of a Turkish user-friendly message. Reference: /app/mobile/src/components/AttachmentsSection.tsx:101 (setError(e.message)) combined with client.ts:187 throwing the raw response text.", "testID": "n/a", "priority": "MEDIUM"}
+      ],
+      "integration_issues": [
+        {"flow": "Attachment upload (Galeri or Dosya) on Expo web preview", "issue": "Multipart 'chunk' field is sent as string '[object Object]' instead of a File because FormData.append with a plain {uri,name,type} object only works on React Native native platforms. Backend returns 422 (Expected UploadFile, received str). Reference: /app/mobile/src/api/client.ts uploadAttachment lines 166-174.", "affected_testIDs": ["task-detail-attach-add", "task-detail-attach-library", "task-detail-attach-document"]}
+      ],
+      "design_issues": [],
+      "react_native_issues": [
+        {"component": "react-native-web pointerEvents", "issue": "Non-blocking deprecation warning: 'props.pointerEvents is deprecated. Use style.pointerEvents' — pre-existing across the app, already known from prior iterations."}
+      ]
+    }
+  },
+  "parity_issues": [
+    {"flow": "Attachment upload", "platform": "mobile", "issue": "Web preview cannot upload attachments at all (422 on chunk), while backend chunked-upload was already verified via curl end-to-end. Per handoff, native platforms should work but the mobile web preview surface is broken.", "expected": "Uploaded file appears in EKLER list with correct filename/size and '(n)' count increments on both native and web preview.", "actual": "Every Galeri/Dosya upload returns 422; list stays empty and 'Henüz dosya yok.' remains; the raw 422 detail JSON is shown as an error banner above the empty state."}
+  ],
+  "test_report_links": [
+    "/app/test_reports/iter112_mobile/02_detail_empty.jpeg",
+    "/app/test_reports/iter112_mobile/03_chooser.jpeg",
+    "/app/test_reports/iter112_mobile/04_after_image_upload.jpeg",
+    "/app/test_reports/iter112_mobile/05_after_txt_upload.jpeg"
+  ],
+  "action_items": [
+    "Fix web upload path in /app/mobile/src/api/client.ts uploadAttachment: on web (Platform.OS === 'web' or typeof window !== 'undefined'), fetch the picked asset uri and append a real Blob/File to FormData instead of the RN {uri,name,type} object. Example: const blob = await (await fetch(file.uri)).blob(); form.append('chunk', new File([blob], file.name, { type: file.type })). Keep the RN branch for native.",
+    "Alternatively, on web branch on the picker output: DocumentPicker.getDocumentAsync and ImagePicker.launchImageLibraryAsync on web expose asset.file (native File) — append that directly when present.",
+    "Wrap the upload error surface (AttachmentsSection setError) to convert raw JSON detail/422 bodies into a friendly Turkish message (e.g. 'Dosya yüklenemedi.') and log the raw detail to console only.",
+    "After the fix, re-run web preview tests for: image upload -> thumbnail render (expo-image with auth headers), tap-to-open full-screen preview modal + task-detail-attach-preview-close, document open (Sharing/download), and delete via task-detail-attach-delete-<id> -> 'Dosyayı sil?' confirm -> Sil."
+  ],
+  "critical_code_review_comments": [
+    "client.ts:170-174 — RN-specific FormData file part shape is not cross-platform; must branch by Platform.OS for the web preview to work.",
+    "AttachmentsSection.tsx:100-102 — surface raw ApiError.message directly; combined with client.ts:187-188 which throws the raw response body text, users see a Pydantic dump. Add a translation layer.",
+    "AttachmentsSection.tsx:203 uses FileSystem.downloadAsync from expo-file-system/legacy for document open — legacy import is fine short-term but flag for migration to the new expo-file-system API in a later iteration.",
+    "Non-blocking: react-native-web pointerEvents deprecation warning is present but not caused by this component."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (skipped per request)", "frontend": "40% — entry point + empty state + chooser modal + regression OK, but upload/list/preview/delete blocked by web FormData bug"},
+  "test_credentials": "serkan / 19071987 (admin) via Expo web preview at https://sertex-enterprise.expo.preview.emergentagent.com",
+  "seed_data_creation": "Created a TEMP task 'TMP-ATTACH-1785942368' via UI (task-create-fab -> task-form-save-button). No attachments were persisted because the web upload path 422s before backend accepts anything. Temp task deleted via task-detail-delete-button + task-detail-delete-confirm at end of run — no residual data.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "To test on web preview after the fix, use page.expect_file_chooser + fc.set_files('/tmp/testfiles/probe.png') around the click on task-detail-attach-library or task-detail-attach-document. Kamera cannot be tested on web (native only). If upload still 422s, curl the backend directly with the same file to isolate whether backend or FormData wire format changed. The EKLER header renders as 'EKLER (n)' when count > 0. Attachment rows carry data-testid=task-detail-attach-item-<id>; delete btn task-detail-attach-delete-<id>; preview close task-detail-attach-preview-close. Confirm modal 'Dosyayı sil?' does NOT currently expose a testID on the Sil button — worth adding one for reliable tests.",
+  "rca of the issue": "React Native's non-standard FormData allows appending { uri, name, type } as a file part; the JS engine on RN then reads the URI and sends a proper multipart file. The browser (react-native-web) uses the standard DOM FormData whose append(name, value) stringifies non-Blob/File values via String(value) → '[object Object]'. Backend endpoint POST /api/tasks/{id}/attachments/chunk declares Pydantic UploadFile for 'chunk', so it fails with value_error. Reproduction: (1) login mobile web as serkan, (2) open any task detail, (3) tap '+ Ekle' -> 'Galeri' or 'Dosya', (4) pick any local file — 422 immediately. Mitigation: on web, convert the picked uri to a Blob/File before appending to FormData (see action_items #1)."
+}

@@ -1,0 +1,14 @@
+{
+  "tid": "6d4e77f8-26b9-4990-8f68-24dc0e88699c",
+  "timing": {
+    "clickAt": 3200,
+    "pointerAt": 3197.800000000745,
+    "toastAt": 3374.2000000011176,
+    "goneAt": 3266.9000000003725,
+    "reqAt": null,
+    "resAt": null,
+    "now": 3890.2000000011176,
+    "bodyHasToast": true
+  },
+  "archived": true
+}

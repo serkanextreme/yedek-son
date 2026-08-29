@@ -1,0 +1,36 @@
+{
+  "summary": "Faz 8 CP5 (Yaklaşan Son Tarih Uyarısı / Due-Soon) full-stack test. Backend: 13 new pytests (test_due_soon.py) + 5 supplementary (test_due_soon_extra.py: scan-now shape, company PATCH RBAC admin/manager/employee, invalid threshold) + 52 regression (tasks/permissions/team_faz2) = 70/70 GREEN. Frontend UI verified via Playwright with admin serkan: (a) Settings → Uyarılar tab shows all threshold chips (reminders-user-{1,2,3,5,7,14}d + reminders-user-default), current-effective card shows '3g'; clicking 7d triggers persist toast then reset via default chip works. Company block absent for admin (no company_id) — expected. (b) New task form has task-reminder-days-select with 8 options including 'Varsayılan (3 gün)' pulled from reminderConfig.effective and 'Bu görev için hatırlatıcı kapalı'. (c) Right-click task-item opens context menu — ctx-due-soon (Yaklaşan Uyarısı) present, click opens ctx-duesoon-submenu with ctx-duesoon-default, ctx-duesoon-disabled, and ctx-duesoon-{1,2,3,5,7,14}d all present. NotificationBell opens correctly.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "TasksPanel - task-reminder-days-select <option>", "issue": "React hydration warning: '<span> cannot be a child of <option>' at TasksPanel.jsx line 2345. The dynamic 'Varsayılan (X gün)' text is wrapped in a <span data-ve-dynamic> injected inside <option>, which is invalid HTML and triggers a console error on every render of the new-task form. Fix: use a plain string / template literal for the option label instead of JSX span, or move the dynamic value out of the option children.", "selector": "[data-testid=\"task-reminder-days-select\"] option", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Task context menu (ctx-duesoon-submenu)", "issues": ["When the task-item is near the bottom of the tasks panel, the ctx-duesoon-submenu (with 8 items) extends below the viewport and its lower entries (5d/7d/14d/disabled) are clipped and unreachable without scrolling. Consider flipping the submenu upward when clickY + submenuHeight > viewportHeight."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_due_soon.py",
+    "/app/backend/tests/test_due_soon_extra.py"
+  ],
+  "action_items": [
+    "OPTIONAL/LOW: Remove <span> wrapper inside <option> children of task-reminder-days-select to silence React hydration warning (TasksPanel.jsx ~line 2345).",
+    "OPTIONAL/LOW: Auto-flip ctx-duesoon-submenu upward when the parent task-item is in the lower half of viewport so all 8 entries remain reachable."
+  ],
+  "critical_code_review_comments": [
+    "TasksPanel.jsx is now ~2350+ lines — split into TaskCard, ReorderableTaskCard, ContextMenu, EditTaskModal, TaskForm sub-modules; this is the second iteration flagging the same file-size problem.",
+    "Priority-chain resolveThreshold logic is duplicated in dueSoonLayer helper and effective-threshold display — extract to a single hook (useEffectiveThreshold) shared with settings tab.",
+    "Consider consolidating ctx-duesoon-{Nd} items into a mapped list to avoid drift between chip whitelist [1,2,3,5,7,14] and menu items."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_due_soon_extra.py (new — 5 supplementary tests)"
+  ],
+  "success_rate": {"backend": "100% (70/70: 13 due_soon + 5 extra + 22 tasks + 20 permissions + 10 team_faz2)", "frontend": "100% (all testids present + settings persist + ctx submenu structure + new-task select correct)"},
+  "test_credentials": "serkan / 19071987 (admin). test_due_soon.py has emp_token fixture that skips if emp1_test/emp123 login fails; /app/memory/test_credentials.md lists emp1_test/emp12345 — minor password mismatch documented but tests skip gracefully.",
+  "seed_data_creation": "test_due_soon_extra.TestCompanyPatchRBAC creates 3 companies + 2 users (manager+employee) per run; unique-prefix cleanup relied on test isolation (no explicit teardown). Existing admin serkan tasks used for UI ctx-menu smoke.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Faz 8 CP5 is FUNCTIONALLY COMPLETE and GREEN. Only 2 LOW-priority polish items remain (hydration span-in-option, submenu positioning). No blockers. Backend regression: 70/70. Frontend testids verified: settings-tab-reminders, reminders-user-{1,2,3,5,7,14}d, reminders-user-default, reminders-company-block (present only when user.company_id set — admin serkan has none, so 0 count is CORRECT), task-reminder-days-select (8 opts), ctx-due-soon, ctx-duesoon-submenu, ctx-duesoon-{default|disabled|Nd}. task-item-{id} (not task-card-{id}) is the row selector; task-menu-{id} is the 3-dot menu; there is NO task-edit-{id} anymore — edit modal is reached via task-menu-{id}. Overdue modal must be dismissed with [data-testid=overdue-alert-close] on every fresh login.",
+  "rca of the issue": "No blocker bug found. The two minor items above are code-hygiene / UX polish — not blocking release."
+}

@@ -1,0 +1,29 @@
+{
+  "summary": "Frontend-only test of the NEW sidebar İŞ KOLU filter TREE in TasksPanel. All 7 primary acceptance criteria pass: (1) vertical tree with TÜMÜ at top and KOLSUZ at bottom, (2) default-collapsed children under Fason Verme, (3) expand/collapse via category-node-toggle-Fason Verme chevron works, (4) localStorage 'sertex_catfilter_expanded_v1' keyed by user id persists both expanded and collapsed states across reload, (5) filter buttons category-chip-QA_AltA / category-chip-Fason Verme / category-chip-all / category-chip-none all respond (chip counts confirm), (6) rollup counts Fason Verme (2/5) include children (QA_AltA 1/1 + QA_AltB 0/1 + 3 other tasks), plus progress bars & detach buttons per node, (7) sibling-only drag guard code-verified in TasksPanel.handleCatDrop (parent_id equality check + toast.info 'Sadece aynı seviyedeki iş kolları arasında sıralama yapılabilir'). No console errors related to this feature (only unrelated /api/weather 502).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "TasksPanel sidebar filter tree", "issues": ["Kargolama root category is not rendered in the tree because it has 0 tasks in the current 'Benim Görevlerim' scope (visibility filter is scope-based). Expected per test data note but is by design — orderedCategories only includes visible-in-scope categories. Not a regression from this feature, but worth confirming with product intent."]}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "API CLEANUP REQUIRED (testing agent could not run via in-browser fetch — cookies are httpOnly so /api call returned 401 without Bearer token). Main agent to run via curl with admin token: (1) PATCH /api/tasks/c7a20d73-372e-4e0b-8064-e8db969c1d9e body {\"category_id\": \"dad15459-f463-40ec-876c-817577e5d811\"}; (2) PATCH /api/tasks/eb0c0b7f-8522-4bf0-80af-53f421a75dda same; (3) DELETE /api/task-categories/c79ebe99-ec7a-41ac-877f-58c8c41ea7ba (QA_AltA); (4) DELETE /api/task-categories/6f386bae-bdbc-4d82-ba46-fb6a91e7972e (QA_AltB)."
+  ],
+  "critical_code_review_comments": [
+    "TasksPanel.jsx is 2419 lines — file continues to grow well beyond the 700-line guideline. Recommend extracting the filter-tree (renderFilterNode + catForest + toggleFilterNode) into its own component/file for maintainability.",
+    "catFilterPrefs.js is clean and well-scoped; good separation. Uses try/catch on both read and write. LGTM.",
+    "renderFilterNode correctly guards non-drag on Fason Verme drag onto a different-parent target via handleCatDrop parent_id equality — sibling-only enforced.",
+    "Minor: HTML5 drag reorder was not automated (Playwright drag with custom DnD is unreliable). Code path (parent_id check + toast.info) was inspected manually."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (frontend-only)", "frontend": "100% (all acceptance criteria pass)"},
+  "test_credentials": "serkan / 19071987 (admin) — used only for filter-tree UI verification",
+  "seed_data_creation": "None created; used pre-seeded QA_AltA/QA_AltB categories and their tasks as supplied.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Sidebar iş kolu filter is now a tree (data-testid=category-filter-bar). Testids used: category-chip-all, category-chip-none, category-node-<Name>, category-node-toggle-<Name>, category-chip-<Name>, category-chip-progress-<Name>, category-detach-<Name>. Overdue-alert modal must be dismissed first via [data-testid=overdue-alert-close] before clicking [data-testid=tab-tasks] to open the panel. localStorage key: sertex_catfilter_expanded_v1 (map of userId -> [catId,...]). Filter tree only shows for categories visible in the current scope (my_tasks etc.); Kargolama (0 tasks) is not shown for serkan.",
+  "rca of the issue": "N/A — feature works as spec. Only ‘issue’ noted is that Kargolama is not rendered (0 tasks in scope), which is the pre-existing scope-based visibility behavior of orderedCategories, not a regression from this feature."
+}

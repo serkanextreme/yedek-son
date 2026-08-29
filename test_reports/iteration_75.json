@@ -1,0 +1,22 @@
+{
+  "summary": "Faz 10 offboarding-on-company-change UI flow verified end-to-end. Created QA_A/QA_B companies, qa_mgr/qa_emp (with lifetime license), one PENDING and one DONE task assigned to qa_emp in QA_A. Logged in as admin serkan/19071987 via UI, opened Settings → Users, clicked admin-company-{qa_emp} button, selected QA_B chip, clicked Save. PATCH /api/admin/users/<id> returned 200 with _offboard={archived:1, orphaned:1, manager_id:<qa_mgr_id>}. UI displayed the success toast: 'qa_emp_242159 → QA_B_242159 · 1 görev müdüre aktarıldı, 1 biten görev arşive taşındı'. Logged out, logged in as qa_mgr_<sfx>/pass1234. NotificationBell badge=1, popover rendered the tasks_orphaned row with package icon and text '📦 qa_emp_242159 ayrıldı — 1 görev size aktarıldı · tıkla ▶'. Clicking the notification's inner button switched the sidebar to tab-orphans (border-sertex-cyan text-sertex-cyan class applied) and the Yarım Kalan panel showed '1 YARIM KALAN GÖREV' with QA_PENDING_242159 (owner qa_emp_242159, company QA_A_242159, '28 Tem den beri sahipsiz', 'BAŞKA ÇALIŞANA DEVRET' button). Switching to tab-tasks (Görevler) confirmed QA_PENDING_242159 also appears in the manager's normal task list (assigned to QA_MGR_242159, company QA_A_242159), while QA_DONE_242159 is NOT present (archived). All 5 requested acceptance criteria PASS.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/test_reports/iteration_75.json"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "NotificationBell.jsx: the data-testid `notification-item-{id}` is on an outer <div>, but the onClick handler is on the inner <button>. Tests that click the item via its testid do nothing unless they target the inner button. Not a user-facing bug (real users click on the visible text which is inside the button), but consider hoisting onClick to the div or adding a data-testid on the button for easier automation."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (skipped per request; backend 16/16 already validated)", "frontend": "100% (5/5 acceptance criteria)"},
+  "test_credentials": "admin serkan/19071987; test users qa_mgr_242159/pass1234 and qa_emp_242159/pass1234 (deleted after test)",
+  "seed_data_creation": "Created via /api: 2 companies (QA_A_242159, QA_B_242159), 2 users (qa_mgr_242159 manager+lifetime, qa_emp_242159 employee+lifetime), 2 tasks (QA_PENDING_242159, QA_DONE_242159 -> patched to done). All test data deleted at teardown (tasks, users, companies).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Faz 10 UI flow fully passes. Overdue-alert modal (data-testid overdue-alert-close) may block early clicks after login — always dismiss it before opening Settings. Notification-item onClick is on inner <button>, not the outer div carrying the testid — use `it.querySelector('button').click()` or `page.get_by_role('button')` inside the item.",
+  "rca of the issue": "N/A — no issues found."
+}

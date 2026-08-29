@@ -1,0 +1,31 @@
+{
+  "summary": "Mobile (Expo web preview) TEAM + NOTIFICATIONS feature tested end-to-end as serkan/19071987. All acceptance criteria pass: 4-tab bottom bar (GÖREVLER/TAKIM/BİLDİRİM/PROFİL) with unread badge (20), TAKIM renders 3 member cards with progress % + Toplam/Tamam/Bekleyen/Gecikmiş stats + red overdue badge (emp1_test=13), BİLDİRİM renders 20 items with type icon+label / task title / relative time / unread dot, tap-to-read decrements badge (20→19), delete removes item (20→19 items), and 'Tümü' clears badge to 0 and hides itself.",
+  "platforms_tested": ["mobile"],
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "mobile": {
+      "ui_bugs": [],
+      "integration_issues": [],
+      "design_issues": [],
+      "react_native_issues": [
+        {"component": "props.pointerEvents", "issue": "React-Native-Web console warning: 'props.pointerEvents is deprecated. Use style.pointerEvents'. Comes from a library (likely react-native-safe-area-context or expo-router internals), not from the new Team/Notifications code. Non-blocking; noted for hygiene."}
+      ]
+    }
+  },
+  "parity_issues": [],
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "notifications.tsx uses useFocusEffect+load('silent') AND a separate useEffect(load('initial')) on mount. Both fire on first mount (mount + first focus) causing a redundant GET /api/notifications call. Not a bug but wasteful; consider skipping the useEffect initial load since useFocusEffect already runs on first focus.",
+    "team.tsx: no useFocusEffect — data won't auto-refresh when returning to the tab after changes elsewhere. Only initial mount + pull-to-refresh. Consider adding useFocusEffect if team stats need to reflect task edits made in other tabs.",
+    "notifications.tsx remove()/markRead()/markAll() catch blocks silently swallow errors ('/* keep optimistic */'). If backend actually fails, UI stays optimistic and user sees no feedback. Consider surfacing a toast on server error."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (skipped per request)", "frontend": "100%"},
+  "test_credentials": "serkan / 19071987 (admin)",
+  "seed_data_creation": "None (used existing preview data). NOTE: This run consumed serkan's real unread notifications — tapped 1, deleted 1, then 'Tümü' cleared the remaining 18. Badge is now 0; re-running the badge/mark-all/delete assertions will require regenerating unread notifications on the backend.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Feature is fully functional. If you re-test notification mutations, first regenerate unread notifications for serkan (backend seed or by adding new tasks that trigger overdue/due_soon detection). testIDs verified live in DOM: team-screen, team-member-card-<uid>, notifications-screen, notification-item-<id>, notification-delete-button-<id>, notifications-mark-all-button. Login lazy-bundle can take ~25s on first cold load — always use wait_for_selector rather than fixed sleeps.",
+  "rca of the issue": ""
+}

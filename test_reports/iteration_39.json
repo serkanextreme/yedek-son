@@ -1,0 +1,44 @@
+{
+  "summary": "iteration_39: Storage Quota Progress Bar added to NEURAL LINK header without removing any existing counter. Backend /api/stats/summary contract extended with quota_mb / quota_percent / license_type / license_label. Admin bypasses (all quota fields null, license_label='Sistem', bar NOT rendered). Ahmet (trial license) gets quota_mb=100, license_label='Deneme (30 gün)' and the progress bar renders. All 7 legacy stat counters preserved. Live-refresh works (adding a note updates both stat-notes AND storage-quota-pct). Backend pytest 10/10 pass. Frontend UI verified end-to-end.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "acceptance_criteria_results": {
+    "1_stats_summary_admin_new_keys": "PASS — admin: quota_mb=null, quota_percent=null, license_type=null, license_label='Sistem'. All 10 legacy keys still present.",
+    "2_stats_summary_user_trial": "PASS — ahmet: quota_mb=100, quota_percent=0.0, license_type='trial', license_label='Deneme (30 gün)'. Legacy keys present, db_mb=0.02.",
+    "3_license_quota_constants": "PASS — /app/backend/license_service.py L43-49 defines LICENSE_QUOTA_MB={trial:100,monthly:500,yearly:2048,lifetime:10240} + FREE_QUOTA_MB=50. server.py L289-306 uses them correctly.",
+    "4_admin_ui_no_storage_quota": "PASS — [data-testid=storage-quota] count=0 for admin. All 7 counter testids present (stat-conversations=67, stat-tasks=3/4, stat-memories=0, stat-files=69, stat-notes=0, stat-email=0, stat-db-size='0.42 MB (sistem)').",
+    "5_user_ui_all_counters_present": "PASS — for ahmet all 7 counters visible: GEÇMİŞ:37, GÖREVLER:0/0, HAFIZA:1, DOSYALAR:11, NOTLAR:0, E-POSTA:0, 0.02 MB (no sistem badge).",
+    "6_user_ui_storage_quota_block_renders": "PASS — [data-testid=storage-quota] rendered; label text 'DEPO · Deneme (30 gün)' (visually uppercased by hud-text CSS to 'DEPO · DENEME (30 GÜN)'); [data-testid=storage-quota-pct]='0.02 / 100 MB · 0.0%'; [data-testid=storage-quota-bar] style='width: 0%;' class contains 'bg-sertex-cyan' (low pct = cyan branch).",
+    "7_color_ramp_logic_code_review": "PASS — NeuralLinkHeader.jsx L134-140: isDanger=pct>=90 → bg-sertex-danger; isWarn=75<=pct<90 → bg-amber-400; else bg-sertex-cyan. L168-177: [data-testid=storage-quota-upgrade] rendered when isDanger; [data-testid=storage-quota-warn] rendered when isWarn && !isDanger. Since ahmet is at 0.0%, both warn and upgrade banners correctly NOT rendered (count=0 verified).",
+    "8_live_refresh_on_note_create": "PASS — as ahmet, added note via note-input+note-add: stat-notes went 'NOTLAR: 0' → 'NOTLAR: 1'; storage-quota-pct re-fetched alongside. onDataChanged plumbing from iteration_38 correctly extends to quota fields.",
+    "9_backend_pytest": "PASS — 10/10 in /app/backend/tests/test_stats_summary.py (6 legacy + 4 new TestStorageQuota tests). See /app/test_reports/pytest/iteration_39_stats.xml.",
+    "10_regression_iteration_38": "PASS — sidebar renders, all 7 tabs still present, click-to-switch-tab still works via stat-notes, note-input+note-add still functional, localStorage keys untouched, no console errors."
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_stats_summary.py",
+    "/app/test_reports/pytest/iteration_39_stats.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Additive-only change verified: no existing testid removed, no existing key removed. Only 4 new backend keys + 1 new frontend UI block (with 4 nested testids: storage-quota / storage-quota-pct / storage-quota-bar / and conditional storage-quota-warn|upgrade).",
+    "Backend server.py L296 sets license_label='Sistem' when admin, 'Ücretsiz' as fallback when non-admin & no license — matches spec ('If ahmet has no active license in the DB, the endpoint should still return quota_mb=50 (FREE_QUOTA_MB) and license_label='Ücretsiz').",
+    "Frontend NeuralLinkHeader.jsx L129 guards with `stats && !stats.is_admin_scope && stats.quota_mb` — safe against null; admin (quota_mb=null → falsy) correctly skipped.",
+    "Cosmetic note: line 158 uses stats.db_mb.toFixed(2) directly — if backend ever returned db_mb as int rather than float, toFixed would still work; if null it would crash. Not a real risk since backend guarantees db_mb is a rounded float, but a defensive Number(stats.db_mb || 0) would match L117 style. Non-blocking.",
+    "hud-text CSS uppercases the label so 'Deneme (30 gün)' becomes 'DENEME (30 GÜN)' in the UI — matches acceptance criterion; small legibility win vs pre-uppercasing on the backend.",
+    "Test suite: parallel xdist workers cause 401s because each worker does its own login and the newer login kicks the older token (single-session rule from Faz 5). Fix (used): run pytest with `-o addopts=''` to disable xdist parallelism for this file, or use scope='session' + retry. Documented for next agent."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_stats_summary.py (added TestStorageQuota class with 4 new tests + expanded EXPECTED_KEYS with 4 new keys)"
+  ],
+  "success_rate": { "backend": "100% (10/10 pytest)", "frontend": "100% (10/10 acceptance)" },
+  "test_credentials": "serkan / 19071987 (admin), ahmet / ahmet123 (user, has active trial license) — both used successfully.",
+  "seed_data_creation": "One transient note 'TEST_iter39_note_for_live_refresh' created for live-refresh verification and immediately deleted after test. One transient 'TEST_stats_summary_task' from pytest also created+deleted. No lingering test data.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Storage Quota bar (iteration_39) is a purely additive enhancement to iteration_38's refactor. Backend /api/stats/summary now returns 14 keys (10 legacy + 4 new: quota_mb, quota_percent, license_type, license_label). Admin bypass: quota_mb=null; user gets 100 (trial) / 500 (monthly) / 2048 (yearly) / 10240 (lifetime) / 50 (free/no license). Frontend NeuralLinkHeader.jsx renders the bar as an IIFE block after stat-db-size, guarded by `stats && !stats.is_admin_scope && stats.quota_mb`. Testids to expect: storage-quota (wrapper), storage-quota-pct (numeric label), storage-quota-bar (colored fill div with inline width%). Conditional: storage-quota-warn (75<=pct<90) and storage-quota-upgrade (pct>=90) — currently 0.0% for ahmet so neither renders. Color ramp: bg-sertex-cyan (<75) → bg-amber-400 (75-90) → bg-sertex-danger (>=90). To test the amber/red ramp you'd need to upload files until db_mb approaches 75/100 or 90/100 MB — not covered here since ahmet is at 0.02/100 MB (0.0%). Pytest tip: run test_stats_summary.py with `-o addopts=''` to bypass xdist parallelism (which triggers single-session-kick 401s across workers).",
+  "rca_of_the_issue": "N/A — clean acceptance test pass. Only agent-side test fix: existing test_stats_summary.py used xdist parallelism and after adding 4 new tests, 2 workers each did their own login, kicking each other's token via single-session rule → 3 spurious 401s. Fixed by running serial (-o addopts='') which is how it was run for the final green 10/10."
+}

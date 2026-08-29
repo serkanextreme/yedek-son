@@ -1,0 +1,50 @@
+{
+  "summary": "iteration_40: Admin-controlled system-wide storage quota. Backend adds GET/PUT /api/admin/system-quota (admin-only, 403 for non-admin, 422 out-of-range) persisting to db.system_settings.global.quota_mb (default 10240 MB = 10 GB, floor 100 MB, ceiling 10 TB). /api/stats/summary admin branch now returns numeric quota_mb equal to the system setting (was null in iteration_39) with license_label='Sistem'. Frontend NEURAL LINK now renders the storage-quota bar for admin too, with an inline pencil-icon editor that prompts for GB and PUTs to the new endpoint. Bar mathematically reshapes: quota 1 GB → 250 GB immediately reduces width%. All acceptance criteria PASS. Backend 23/23 pytest green (13 new + 10 regression). Frontend end-to-end verified for both admin and non-admin (ahmet still sees license-based bar with no pencil).",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "acceptance_criteria_results": {
+    "1_GET_admin_system_quota": "PASS — returns {quota_mb:10240, min_mb:100, max_mb:10485760, default_mb:10240}. ahmet (non-admin) → 403. No auth → 401.",
+    "2_PUT_admin_system_quota_validation": "PASS — accepts 100..10485760, rejects 0 / 99 / 10485761 with 422. ahmet → 403. No auth → 401. Persists via upsert on db.system_settings key='global'.",
+    "3_stats_summary_admin_quota_now_system_wide": "PASS — admin GET returns quota_mb=10240 (default), quota_percent=round(db_mb/quota_mb*100,1), license_label='Sistem', is_admin_scope=true. All 10 legacy stat keys still present.",
+    "4_frontend_admin_bar_renders": "PASS — [data-testid=storage-quota] IS visible for admin (was hidden in iteration_39). Label 'DEPO · SİSTEM'. pct text '0.00/10 GB · 0.0%'. Auto-switches to GB when quota_mb >= 1024 MB.",
+    "5_frontend_edit_flow_pencil": "PASS — [data-testid=storage-quota-edit] pencil visible only for admin. Mocked prompt='1' → toast 'Kapasite 1 GB olarak ayarlandı' → text becomes '0.00/1 GB · 0.0%'. Mocked prompt='250' → text becomes '0.00/250 GB · 0.0%'. Bar style width% recomputes on each change.",
+    "6_bar_reshape_math": "PASS — verified via API: with db_mb=0.42, quota=10240 → pct=0.0; quota=1024 → pct=0.0 (0.041 rounds down). Math formula matches: pct=round(db_mb/quota_mb*100,1). User-stated scenario (db_mb=8192, quota 10240→80% → quota 256000→3.2%) mathematically confirmed via test_stats_summary_math_reshapes_low_pct_after_increase and by direct API PUT verification.",
+    "7_validation_errors": "PASS — prompt='0' → toast 'Geçersiz değer'. prompt='0.05' (< 0.098 GB = 100 MB floor) → toast 'Değer 0.10 — 10240 GB aralığında olmalı'. Backend PUT with quota_mb=99 → 422.",
+    "8_non_admin_no_edit_pencil": "PASS — for ahmet (trial license), [data-testid=storage-quota-edit] count=0, bar label='DEPO · DENEME (30 GÜN)', pct='0.02/100 MB · 0.0%'. Editing endpoints reject non-admin with 403.",
+    "9_regression_iteration_38_and_39": "PASS — all existing testids intact. Updated iteration_39's stale test (which asserted admin quota_mb is None) to reflect the intentionally changed contract. All 10 stats regression tests + 13 new quota tests = 23/23 green.",
+    "10_default_quota_restored": "PASS — left db.system_settings.global.quota_mb=10240 (10 GB) at end. Verified via GET /api/admin/system-quota."
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_system_quota.py",
+    "/app/backend/tests/test_stats_summary.py",
+    "/app/test_reports/pytest/iteration_40_system_quota.xml",
+    "/app/test_reports/pytest/iteration_40_stats_regression.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Contract change from iteration_39: admin's quota_mb went from `null` to a numeric value (default 10240). This is the intended change but required updating the pre-existing test_admin_quota_is_none_label_sistem in test_stats_summary.py; done.",
+    "Range-error toast copy is technically correct but slightly confusing: 'Değer 0.10 — 10240 GB aralığında olmalı' displays the ceiling as '10240 GB' (i.e., 10 TB). Users may misread this. Consider showing '10 TB' when max_mb/1024 >= 1024 for better readability. Non-blocking UX polish.",
+    "Backend _get_system_quota_mb() gracefully falls back to DEFAULT_SYSTEM_QUOTA_MB when doc missing / malformed / non-positive — good defensive coding.",
+    "Pydantic Field(..., ge=MIN, le=MAX) on SystemQuotaUpdate correctly returns 422 for out-of-range and non-integer values.",
+    "Frontend guard changed to just `stats && stats.quota_mb` (removed !stats.is_admin_scope). Correct — admin now included. Non-admin without a license still gets quota_mb=50 (FREE_QUOTA_MB) so the bar still renders for them too, unchanged from iteration_39.",
+    "Prompt cancel (returns null) is a proper no-op — verified in code (Sidebar.jsx L420) but not exercised in UI tests since window.prompt was mocked; behavior is straightforward.",
+    "The Sidebar.jsx editSystemQuota handler wraps in try/catch with a generic 'Kapasite güncellenemedi' fallback toast — good.",
+    "storage-quota-edit button uses e.stopPropagation() to prevent parent click handlers from firing — good.",
+    "One tiny cosmetic note: title tooltip on the storage-quota wrapper hard-codes 'Lisans planı' even in admin scope ('Lisans planı: Sistem — ...'). For admin scope, 'Kapasite' would read better than 'Lisans planı'. Non-blocking."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_system_quota.py (NEW — 13 tests covering GET/PUT/validation/RBAC/stats-summary integration)",
+    "/app/backend/tests/test_stats_summary.py (updated test_admin_quota_is_none_label_sistem → test_admin_quota_system_wide_label_sistem to reflect iteration_40's intentional contract change)"
+  ],
+  "success_rate": { "backend": "100% (23/23 pytest)", "frontend": "100% (10/10 acceptance)" },
+  "test_credentials": "serkan / 19071987 (admin), ahmet / ahmet123 (user with active trial license)",
+  "seed_data_creation": "Test bumped db.system_settings.global.quota_mb multiple times (1024, 256000, 100) during tests; final state restored to default 10240 MB (10 GB) via both pytest fixture teardown AND UI restore step. Verified post-test via curl.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "iteration_40 introduces admin-editable system quota. New endpoints: GET/PUT /api/admin/system-quota. New testids in UI: [data-testid=storage-quota-edit] (admin-only pencil). Admin's /api/stats/summary now returns numeric quota_mb (was null in iteration_39). Default 10 GB = 10240 MB, min 100 MB, max 10 TB (10485760 MB). When prompting in the UI the user types GB (float, comma-or-dot decimal); frontend converts to MB via Math.round(gb*1024). Range error toast shows GB values with 2 dp on min and floored int on max. Persists in db.system_settings collection under key='global'. To reset for testing: PUT quota_mb=10240 as admin. To reproduce user scenario db_mb=8192 quota 10240→80%, add ~8 GB of data (not feasible in preview env; verified mathematically instead).",
+  "rca_of_the_issue": "N/A — clean feature acceptance. The single test failure (test_admin_quota_is_none_label_sistem) was expected: iteration_39's test locked the admin-quota=null contract, and iteration_40 intentionally reversed that. Test updated to match the new contract; no product bug."
+}

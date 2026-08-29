@@ -1,0 +1,35 @@
+{
+  "summary": "Frontend-only bug fix verification for HUD panel restore-chip side. Login serkan/19071987 successful. All acceptance criteria verified: (1) Default hides — 'hud-top-left' chip left (boxX=0, styleLeft=0px), 'hud-bottom-left' chip left (boxX=0), 'hud-top-right' chip right (boxRight=1920, styleRight=0px). (2) BUG-FIX drag-then-hide — after dragging SERTEX·SİSTEM from x=17 to x=1520 (right half) and clicking hide, restore chip appears on the RIGHT edge (box [1778, 1920], styleRight=0px). After dragging ZAMAN·HAVA to x≈250 (left half) and hiding, restore chip appears on the LEFT edge (box [0, 136], styleLeft=0px). (3) Restore chips restore panels to their previous positions. (4) Color-picker regression: amber (#fbbf24 → rgb(251,191,36)) applies to hud-top-left header and persists across reload. (5) Overdue modal component pathway intact (only mounts when overdue tasks exist — no overdue tasks at test time so element not in DOM, which is expected).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "HUD panels + right sidebar",
+        "issues": [
+          "When the right sidebar is open (default ~456px wide), a panel dragged into the sidebar's coordinate range gets visually covered by the sidebar and its hide/palette/minimize buttons become unclickable through the sidebar overlay (sidebar z-index above the panel z-30). Not a regression of this bug fix — but a UX foot-gun: the user can 'lose' a panel behind the sidebar. Consider (a) clamping the panel's max x to (innerWidth - sidebarWidth - panelWidth) when the sidebar is open, or (b) bringing the panel to the foreground on any interaction, or (c) auto-nudging the panel back into the visible canvas after the sidebar opens."
+        ]
+      }
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "OPTIONAL DESIGN: prevent HUD panels from being dragged behind the open right sidebar (see design_issues). Not blocking; the reported chip-side bug is fully fixed."
+  ],
+  "critical_code_review_comments": [
+    "DraggablePanel: `panelCenterX = pos.x + size.width / 2` uses component state, not the live DOM position. On mount, `pos` is initialized from saved-state or defaults. If the user resizes the window between drag and hide, `window.innerWidth` at hide-time is fresh but `pos.x`/`size.width` are only updated on Drag/Resize stop. Edge-case: a panel positioned exactly at innerWidth/2 during resize could put the chip on an unexpected side — acceptable but worth documenting.",
+    "DraggablePanel line 111-119: `isLeftSide` and `isBottom` are computed on every render but they read `window.innerWidth`/`window.innerHeight` directly. There is no `resize` listener that forces a re-render when the window is resized, so if the user resizes AFTER hiding, the chip won't reposition. Consider adding a `useWindowSize` hook or updating chip position on resize.",
+    "DraggablePanel line 116: `top: pos.y || 12` — if pos.y is exactly 0 (top-anchored), this falls back to 12. Minor: use `pos.y ?? 12` (nullish coalescing) for correctness, though pos.y is never negative in practice.",
+    "DraggablePanel: default `border` class is applied via className='...border' but border color is set inline via style; if the parent CSS ever removes .border, the chip will be transparent. Minor styling coupling.",
+    "HUDOverlay.jsx: BottomLeftHUD uses `defaultPos={{ x: 16, y: window.innerHeight - 210 }}` computed at module-init/render time; if the window is resized after mount the default won't update (only the persisted value is used). Not a new bug — pre-existing behavior."
+  ],
+  "updated_files": [],
+  "success_rate": {"frontend": "100% (5/5 assertions pass — default LEFT, default RIGHT, default bottom-LEFT, dragged-RIGHT chip on RIGHT, dragged-LEFT chip on LEFT, plus color picker persistence)"},
+  "test_credentials": "serkan / 19071987",
+  "seed_data_creation": "None. Cleared localStorage 'sertex_windows_v1' at start of each run for deterministic panel defaults.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "The chip-side bug reported in Turkish ('gizleyen ok guzel ama pencere solda olunca ok gizle diye tıklayınca sag tarafa atıp gizliyor') is FULLY FIXED. DraggablePanel now derives chip side from `pos.x + size.width/2 < window.innerWidth/2`, and HideIcon/RestoreIcon flip accordingly. Key data-testids: hud-{topleft|topright|bottomleft}-{hide|restore|palette|minimize|header|color-{key}}. To test dragging, first close the right sidebar via `[data-testid=\"sidebar-toggle\"]` (default sidebar covers ~x=1464-1920 at 1920px viewport, so any panel dragged there is inaccessible until sidebar is closed). Style detection: left-side chip has `chip.style.left='0px'` and empty `style.right`; right-side chip has the reverse. Overdue modal only mounts when overdue tasks exist; component not in DOM otherwise.",
+  "rca of the issue": "Original bug: DraggablePanel computed the restore-chip side from the `anchorRight` prop (a static prop set at parent's initial render), so hiding a LEFT-side panel that had been dragged to the RIGHT (or vice versa) would place the chip on the wrong side. Fix in /app/frontend/src/components/DraggablePanel.jsx lines 107-121: `panelCenterX = pos.x + size.width/2; isLeftSide = panelCenterX < window.innerWidth/2;` — chip position and arrow direction now derive from the panel's ACTUAL current center, which is updated on every drag/resize stop and persisted in localStorage. Verified: (a) LEFT-defaults yield left chips, RIGHT-default yields right chip; (b) after moving a LEFT panel to the right screen half, its chip appears on the right; (c) after moving a RIGHT panel to the left screen half, its chip appears on the left."
+}

@@ -1,0 +1,25 @@
+{
+  "summary": "Frontend-only verification of TASK CARD vertical iş-kolu tree (Option B) feature. Logged in as serkan, dismissed overdue modal, opened Görevler (tab-tasks) sidebar, located test task 549c3ba0 (BUG69_UI_..._TASK_2 with sub-category QA_AltKol under parent Fason Verme). All 5 required scenarios PASSED: (T1) default collapsed compact tag shows only leaf 'QA_AltKol' + expand chevron; (T2) clicking task-category-expand reveals task-category-tree containing both 'Fason Verme' and 'QA_AltKol' plus a task-category-collapse chevron; (T3) collapse hides the tree and restores compact tag; (T4) localStorage key 'sertex_cattree_expanded_v1' is written keyed by user id ('703a4b50-...': ['549c3ba0-...']) and state SURVIVES a full page reload — expanded stays expanded, and after collapsing+reloading it stays collapsed; (T5) top-level regression: another task with category 'Fason Verme' (no parent) renders the plain compact task-category-<id> tag with NO expand chevron (unchanged behavior). No card onClick/expand-detail triggered by the chevron (stopPropagation works — no side effects observed during clicks). Cleanup performed: task 549c3ba0 category reverted to Fason Verme (PATCH 200) and QA_AltKol category deleted (DELETE 200).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "catTreePrefs.js is clean, safe (try/catch on JSON parse & localStorage write), user+task-keyed — good.",
+    "TaskCard.jsx toggleCatTree correctly calls e.stopPropagation() so chevron does not bubble to card handlers.",
+    "getCategoryPath has cycle-guard (Set) — safe against malformed parent_id loops.",
+    "Non-hierarchical categories fall through to plain compact tag branch (no chevron rendered) — top-level regression preserved."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a", "frontend": "100%"},
+  "test_credentials": "serkan / 19071987 (admin)",
+  "seed_data_creation": "None — used main-agent-prepared task 549c3ba0 and QA_AltKol category; cleaned both up after testing as instructed.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 98 verified iş-kolu vertical tree per-user-persisted collapse/expand on task cards. Feature works end-to-end. Cleanup done (task category restored to Fason Verme, QA_AltKol category deleted). No open issues.",
+  "rca of the issue": "N/A — feature verified working; no bugs found."
+}

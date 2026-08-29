@@ -1,0 +1,35 @@
+{
+  "summary": "SERTEX mobile FAZ A parity build tested end-to-end via Expo web preview (mobile viewport 390x900). Task Detail screen and Category Management screen — all flows verified with real mutations on preview DB. Cleanup complete (no TESTQA leftovers).",
+  "platforms_tested": ["mobile"],
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "mobile": {
+      "ui_bugs": [
+        {"component": "TaskDetailScreen", "issue": "After a hard-reload on /task/[id] (browser refresh) followed by delete, router.back() is a no-op because the navigation stack is empty, so the user is left on a stale task-detail page after the DELETE API succeeds. Repro: open task detail via list → reload the page → tap delete → confirm. Delete succeeds server-side but UI does not navigate to the tasks list. On a normal in-app forward navigation (list → detail → delete) the back navigation works correctly.", "testID": "task-detail-delete-confirm", "priority": "LOW"}
+      ],
+      "integration_issues": [],
+      "design_issues": [],
+      "react_native_issues": [
+        {"component": "pointerEvents prop", "issue": "Console warning during login: 'props.pointerEvents is deprecated. Use style.pointerEvents'. Likely from a react-native-web component surface (e.g. safe-area / gesture wrapper). Not blocking, but should be migrated to style.pointerEvents. Reference: seen in browser console on route change."}
+      ]
+    }
+  },
+  "parity_issues": [],
+  "test_report_links": [],
+  "action_items": [
+    "OPTIONAL: In /app/mobile/app/task/[id].tsx doDelete(), fall back to router.replace('/(tabs)/tasks') if router.canGoBack() is false, so a direct-URL / reloaded detail page still returns to the tasks list after delete.",
+    "OPTIONAL: Track down the deprecated `pointerEvents` prop warning and migrate to `style.pointerEvents`."
+  ],
+  "critical_code_review_comments": [
+    "task/[id].tsx: doDelete uses router.back() unconditionally — a defensive router.replace fallback would harden the deep-link/refresh case.",
+    "CategoryEditorModal.tsx: the company search TextInput has no testID (only the chip results do). Consider adding one to make future tests less reliant on positional selectors.",
+    "CategoryEditorModal.tsx move-target list intentionally excludes descendants (good — prevents cyclic parenting). Verified by inspection."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (skipped per request)", "frontend": "18/19 = 95% (one minor UX gap after reload)"},
+  "seed_data_creation": "Created and cleaned up: 1 TESTQA task ('TESTQA Detail Task' → renamed 'TESTQA Detail Task Edited') deleted; 1 TESTQA subtask added and deleted; 1 TESTQA root category ('TESTQA Root' → renamed 'TESTQA Root Renamed') deleted; 1 TESTQA sub category ('TESTQA Sub') created, moved to root, and deleted. Preview DB left clean — verified: category list shows only original Fason Verme + Kargolama.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Mobile FAZ A (Task Detail + Category Manager) is functionally complete. Every testID in DETAIL and CATMGR registries responds correctly. When automating modals in Expo web preview at 390x844 viewport, some buttons (e.g. task-form-save-button, task-detail-delete-confirm, category-editor-save-button, category-delete-confirm) can land outside the strict viewport used by Playwright — using `element.evaluate('el => el.click()')` reliably clicks them without needing to grow the viewport. Persistence of subtasks and reminder chips was verified by hard-reloading the detail route (~1s bundle re-hydrate) and re-inspecting DOM.",
+  "rca of the issue": "The single UX gap (post-reload delete does not navigate away) is caused by expo-router's history stack being empty after a hard page reload on a deep route; `router.back()` has nowhere to pop to and becomes a no-op. Fix by guarding with `router.canGoBack() ? router.back() : router.replace('/(tabs)/tasks')`."
+}

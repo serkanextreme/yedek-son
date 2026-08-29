@@ -1,0 +1,51 @@
+{
+  "summary": "Frontend-only testing of the detachable sidebar tabs feature (FloatingTabWindow + Sidebar.jsx changes). Logged in as serkan/19071987, cleared localStorage, and exercised every acceptance criterion listed in the review request. 11 of 11 scenarios PASS. Additional verification confirmed that the sidebar 'Bu sekme ayrı bir pencerede yüzüyor' placeholder + [data-testid=sidebar-redock-notes] button are reachable when the currently-active sidebar tab becomes the floating one (e.g. detach all-but-notes, activate notes, then detach notes). All floating windows share unified HUD styling, drag/resize via react-rnd, per-tab z-index focus, minimize toggle, drop-onto-sidebar auto-dock with cyan glow, and localStorage persistence under 'sertex_floating_tabs_v1' + 'sertex_floating_tabs_geom_v1'. No regressions detected on tab reordering, tab click switching, or normal tab body rendering.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Sidebar / detachable tabs",
+        "issues": [
+          "Minor UX: Clicking a floating tab's entry in the sidebar tab bar only calls onFocusFloating (raises z-index of the floating window) but does NOT set the sidebar's active tab to that floating key. Consequence: the 'Bu sekme ayrı bir pencerede yüzüyor' placeholder + '⬅ Sidebar'a Geri Koy' button is not directly reachable by clicking a floating tab in the bar — it only appears when the currently-active tab itself gets detached and no other still-docked tab exists to auto-switch to. This is intentional per DraggableTab.onClick (Sidebar.jsx L85), but the review request wording suggests clicking the tab should surface the redock placeholder. Consider either (a) also calling setTab(tabKey) when isFloating so the placeholder shows on click, or (b) documenting current behaviour."
+        ]
+      }
+    ]
+  },
+  "acceptance_criteria_results": {
+    "1_pop_out_icon_on_hover": "PASS — all 7 tab-detach-<key> buttons rendered (history, tasks, memory, files, email, notes, backup)",
+    "2_detach_notes_creates_floating_window": "PASS — floating-tab-notes appears with header 'Notlar', min + dock buttons",
+    "3_sidebar_muted_italic_and_placeholder_reachable": "PASS — sidebar tab classes include 'text-sertex-textMuted/50 italic', tab-detach-notes hidden while floating; placeholder+sidebar-redock-notes visible when active tab is the floating one (verified by detaching-all path)",
+    "4_draggable_via_header": "PASS — dragged from (288,135) to (468,225) via .floating-tab-header-notes",
+    "5_multi_detach_simultaneous": "PASS — notes/tasks/memory (and later all 7) coexist as separate floating-tab-<key> instances",
+    "6_drop_to_dock_with_glow": "PASS — border-sertex-cyan + shadow-[0_0_24px_rgba(0,240,255,0.7)] applied during drag over sidebar; releasing inside sidebarBounds auto-docks (floating-tab-notes removed, tab-detach-notes returns)",
+    "7_localstorage_persistence": "PASS — sertex_floating_tabs_v1 = {\"notes\":true,\"tasks\":true,\"memory\":true}; sertex_floating_tabs_geom_v1 stores {x,y,minimized} per tab",
+    "8_reload_restores_state_and_geometry": "PASS — after reload, all three floating windows recreated at their saved positions (notes x=468 matched exactly)",
+    "9_minimize_expand_toggle": "PASS — height 480 → 42 (collapsed to header) → 480 on re-toggle",
+    "10_dock_button_reattach": "PASS — floating-tab-notes-dock click removes the window, tab-detach-notes reappears in sidebar",
+    "11_non_floating_tab_behaviour": "PASS — clicking a docked tab activates it, note-input rendered in sidebar body, no placeholder",
+    "12_focus_floating_via_sidebar_tab_click": "PASS — z-index of floating-tab-notes bumped from 58 → 59 after clicking sidebar's tab-notes entry (zCounterRef increments)"
+  },
+  "test_report_links": [
+    "/app/test_reports/iteration_36.json"
+  ],
+  "action_items": [
+    "OPTIONAL / low priority: In Sidebar.jsx DraggableTab.onClick (L83-87), when isFloating is true, also call onClick() (setTab) in addition to onFocusFloating(). This would make the placeholder + '⬅ Sidebar'a Geri Koy' button directly discoverable by clicking a floating tab in the tab bar. Current behaviour only reveals it after the active tab itself is detached with no siblings to fall back to."
+  ],
+  "critical_code_review_comments": [
+    "FloatingTabWindow.jsx (161 lines) and Sidebar.jsx (901 lines) — Sidebar.jsx is now over the 700-line threshold from the code-review guideline; consider extracting renderTabBody, DraggableTab, and the floating-tabs state block into standalone files to keep files small and reusable.",
+    "FloatingTabWindow.jsx correctly uses window bounds='window' for react-rnd and persists geometry through JSON.parse/stringify with try/catch — safe.",
+    "sidebarBounds useMemo (Sidebar.jsx L667) reads window.innerWidth/innerHeight once at compute time; if the user resizes the browser window it will not recompute until dock/dims/open change. Consider adding a window 'resize' listener to invalidate it, otherwise drop-to-dock detection may fall out of sync after a viewport resize.",
+    "detachTab auto-switches away from the detached active tab (L215-220). If ALL still-docked tabs also get filtered out (e.g. user detaches every tab), the placeholder branch is only entered because tab state remains pointing at a floating key — this is fine but relies on 'stillDocked' being undefined. No bug, but worth documenting.",
+    "Reorder.Item click handler at L83 short-circuits when isFloating with only onFocusFloating() — see design_issues above."
+  ],
+  "updated_files": [],
+  "success_rate": { "backend": "not tested (frontend-only scope per request)", "frontend": "100%" },
+  "test_credentials": "serkan / 19071987 (admin) — used successfully. ahmet / ahmet123 available but not needed.",
+  "seed_data_creation": "None. Cleared localStorage keys sertex_floating_tabs_v1 and sertex_floating_tabs_geom_v1 between test scenarios; no server-side data created.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Feature 'detachable sidebar tabs' is fully working. Cookie banner in bottom-right does NOT block interaction. Sidebar is docked right at width=440 by default. Drop-to-dock uses sidebarBounds (window.innerWidth-440..innerWidth, 0..innerHeight); simulate with page.mouse.down/move/up because react-rnd relies on native pointer events. Header class per tab is .floating-tab-header-<tabKey> (unique). LocalStorage keys to inspect: sertex_floating_tabs_v1 (which tabs float, values are booleans) and sertex_floating_tabs_geom_v1 (per-tab {x,y,width,height,minimized}). Only one minor UX nit reported — see action_items. Backend was NOT re-tested per scope; iteration_35 backend results remain valid.",
+  "rca_of_the_issue": "N/A — new feature acceptance testing, no bug to RCA. The single design_issue is an intentional UX branch in Sidebar.jsx DraggableTab.onClick (L83-87) that prioritises focusing the floating window over changing the sidebar's active tab; whether this matches product intent is a design decision for the main agent."
+}

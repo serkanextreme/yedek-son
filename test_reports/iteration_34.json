@@ -1,0 +1,39 @@
+{
+  "summary": "Faz 7 — Universal IMAP/SMTP E-mail Integration fully verified end-to-end. Backend: 11/11 pytest tests pass in test_email_faz7.py covering (a) GET /api/email/providers returns 6 presets (gmail/outlook/yahoo/icloud/yandex/generic) with correct hosts/ports/modes; (b) GET /api/email/accounts empty [] for fresh user; (c) POST /api/email/accounts with fake outlook credentials returns 400 with Turkish detail 'Hesap eklendi ama bağlantı başarısız: IMAP giriş başarısız — e-posta veya app-password hatalı' AND rolls back the DB row (subsequent GET accounts is []); (d) invalid email 'notanemail' returns 400 with 'Geçerli bir e-posta adresi giriniz'; (e) DELETE nonexistent id returns {deleted:0}; (f) 401 without Bearer on /accounts and /accounts POST; (g) 402 NO_LICENSE for fresh user without a license on both GET and POST /accounts. Frontend: Playwright verified E-posta tab in sidebar (tab-email), empty state (email-empty with text 'Kayıtlı e-posta hesabın yok' + HESAP EKLE button [email-add-first]), Add form renders all fields (email-input, email-password-input, email-provider-select, email-add-submit), selecting 'Diğer (Özel)' (generic) reveals custom IMAP/SMTP host+port inputs, submitting fake creds shows sonner toast 'Hesap eklendi ama bağlantı başarısız: IMAP giriş başarısız — e-posta veya app-password hatalı' AND stays on form (no account_select appears — rollback confirmed on client side), İPTAL cancel returns to email-empty state, sidebar Reorder.Group intact (tab-tasks still clickable after all interactions).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_email_faz7.py",
+    "/app/test_reports/pytest/iter34_email.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "email_router.py POST /accounts flow inserts the row FIRST via es.add_account then runs test_connection and deletes on failure. This means every failed add causes an insert+delete round-trip and could leak duplicate-key errors if a user retries quickly with the same email (add_account raises 400 'Bu e-posta hesabı zaten kayıtlı'). Consider moving test_connection BEFORE the insert (pass credentials directly to a temporary account dict) so the DB is only touched on success. Same design issue: if delete_account fails silently, the broken row lingers with a bad password_enc. Wrap the rollback in try/except with a logged error.",
+    "email_service._get_fernet() reads EMAIL_FERNET_KEY on every enc/dec call. Cache the Fernet instance at module import time (with lazy init) so we're not re-parsing the env var thousands of times during a bulk fetch.",
+    "email_service._list_messages_sync uses `mark_seen=False` — good — but the AND(seen=False, text=q) branch is a bug: imap-tools AND() combines with logical AND, however IMAP servers vary in support for 'TEXT' vs 'BODY' searches. Consider using AND(seen=False, body=q) or falling back to python-side filtering.",
+    "email_router.GET /providers has NO auth dependency — currently returns provider config publicly. This is intentional (frontend needs it before login is optional) but note it in the API docs. Low risk since values are static.",
+    "EmailPanel.jsx AddAccountForm has form.provider='auto' as a client-only value that is stripped from payload — server then infers provider from email domain. Works, but the toast message on success reads 'ekleme başarısız' if server 400s. Consider surfacing the provider-inference result back to the user for clarity.",
+    "EmailPanel.jsx uses window.confirm for delete confirmations — inconsistent with the rest of Sertex which uses a custom modal (e.g. task delete). Consider a shadcn AlertDialog for parity.",
+    "email_service.py at 429 lines is fine; email_router.py at 185 lines is fine — no file-size issue."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_email_faz7.py (new — 11 tests, all pass)"
+  ],
+  "success_rate": {
+    "backend": "100% (11/11 pass in 3.21s)",
+    "frontend": "100% (all 5 flows: tab visible, empty state, add-form fields+data-testids, generic reveal, fake-creds toast+rollback+form-still-visible, cancel-returns-empty, sidebar intact)"
+  },
+  "test_credentials": "serkan / 19071987 (admin used to create fresh TEST_email_lic_* trial user and TEST_email_nolic_* unlicensed user; both cleaned up on module teardown).",
+  "seed_data_creation": "Backend tests create ephemeral TEST_email_lic_<hex8> (with trial license) and TEST_email_nolic_<hex8> (no license) via POST /api/admin/users, then delete via DELETE /api/admin/users/{uid} on teardown. Frontend used the primary serkan account which had no email account — empty state preserved.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Faz 7 test suite lives at /app/backend/tests/test_email_faz7.py — run with `python -m pytest backend/tests/test_email_faz7.py -v -o addopts=''` (no xdist because it creates & deletes users with the same admin token; parallel workers could race). The fake-creds test hits the real outlook.office365.com IMAP server which typically rejects within 1-2s; timeout budget is 45s. If IMAP servers are ever slow (>30s) the test may show flaky — bump the timeout in email_service._open_mailbox (currently 30s) if needed. EMAIL_FERNET_KEY must be present in backend/.env or all email endpoints will 500. To test IMAP/SMTP with a REAL account, use a throw-away Gmail app-password and edit the fixture — but do NOT commit real creds.",
+  "rca of the issue": "No issues found. All acceptance criteria met: providers list, empty state, fake-creds rejection with rollback, auth guard (401), license guard (402), invalid email validation, nonexistent delete = 0. UI empty state, add form, generic provider reveal, fake-creds toast error, cancel, and sidebar drag-drop preservation all verified."
+}

@@ -1,0 +1,43 @@
+{
+  "summary": "End-to-end verified the 4-part TasksPanel batch on preview (frontend only, per request). All 4 features PASS and no regressions detected. Zero native browser confirm/alert dialogs fired during the entire session (page.on('dialog') hit count = 0); grep confirms window.confirm/window.alert exist only inside /app/frontend/src/lib/confirm.jsx fallback. Test data was created & cleaned up on preview only.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "features_verified": {
+    "F1_themed_confirm_dialogs": {
+      "status": "PASS",
+      "evidence": "Dissolve flow (personal view + team view both) opens data-testid='confirm-modal' with confirm-cancel (aborts, group intact) and confirm-ok (dissolves, toast). Native page.on('dialog') listener armed throughout: 0 hits across all flows. Static code grep: no window.confirm/window.alert usages outside confirm.jsx fallback."
+    },
+    "F2_completion_duration_label": {
+      "status": "PASS",
+      "evidence": "After clicking task-check-{id} on a pending task, the completed card renders data-testid='task-completed-at-{id}' with text 'Bitiş: 29 Tem 20:44' AND a data-testid='task-duration-{id}' pill showing '1 günde' (Turkish, human-readable)."
+    },
+    "F3_intra_window_drag_in_detached": {
+      "status": "PASS",
+      "evidence": "group-detach-{gid} opens data-testid='detached-group-window-{gid}'. Sidebar shows placeholder data-testid='task-group-detached-{gid}'. Each member row has drag handle data-testid='group-window-drag-{taskId}'. Dragging first member below last reordered the DOM order (before=[A,B,C] -> after=[B,C,A]). Dock button data-testid='detached-group-dock-{gid}' returns group to sidebar; placeholder cleared."
+    },
+    "F4_static_team_task_groups": {
+      "status": "PASS",
+      "evidence": "Group created by emp1_test rendered in mgr_test team scope (task-scope-team) as data-testid='task-group-{gid}' with group-progress, group-edit, group-dissolve inside AND NO group-drag handle (static, read-oriented) — matches spec. Member rows include data-testid='task-owner-{taskId}' and data-testid='task-nudge-{taskId}'. 20 nudge buttons rendered on team task cards. Dissolve from team view also opens themed confirm-modal (not native)."
+    },
+    "regression_personal_scope": {
+      "status": "PASS",
+      "evidence": "Personal view continues to render 32 tasks, link-tasks-toolbar-btn opens LinkTasksModal with 32 selectable link-add-{id} options, group creation via link-save works, group block in personal view has drag handle (group-drag-{gid}) preserved, detach/dock preserved, dissolve/cancel preserved. No page errors, no crashes, no blank panel."
+    }
+  },
+  "test_report_links": ["/app/test_reports/iter84_after_complete.png", "/app/test_reports/iter84_detached.png", "/app/test_reports/iter84_mgr_team.png"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "TasksPanel.jsx is 3,875 lines — exceeds 700-line guideline. Consider splitting StaticTaskGroupBlock, TaskGroupBlock, DetachedGroupWindow, LinkTasksModal-wrapper into dedicated files for maintainability. Not blocking."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "skipped (per request)", "frontend": "100% (5/5 verifications passed)"},
+  "test_credentials": "serkan/19071987 (admin), mgr_test/mgr12345 (manager), emp1_test/emp12345 (employee)",
+  "seed_data_creation": "Created and dissolved three transient groups during the run: TEST_ITER84_GRP (serkan), TEST_ITER84_TEAM_GRP (serkan), TEST_ITER84_EMP_GRP (emp1_test). All groups were dissolved at end-of-run — no residual test groups. One serkan task (b02a4348-98cc-4286-9cb9-831274da5a04) was marked done to validate Feature 2 and was left in 'done' state (harmless).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "4-part TasksPanel batch (themed confirm everywhere, completion duration pill, intra-detached-window drag reorder, static team group block with nudge) is fully verified on preview. Native confirm dialogs are gone across the codebase (only fallback in confirm.jsx remains). If future work touches TasksPanel, re-run the same flows: (a) as serkan create group + detach + drag + dissolve, (b) as emp1_test create group then verify mgr_test team view sees static block with progress/edit/dissolve and NO group-drag, (c) toggle a task complete and assert task-duration-{id} + task-completed-at-{id} appear. LinkTasksModal testids: link-tasks-modal, link-add-{id}, link-group-name, link-show-progress, link-save. Detached-window drag handle testid pattern: group-window-drag-{taskId}."
+}

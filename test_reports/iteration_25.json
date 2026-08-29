@@ -1,0 +1,27 @@
+{
+  "summary": "Frontend-only test of iteration_25 wake-word feature. All 11 requested test cases pass. Toggle button state changes, localStorage persistence (sertex_wake_settings_v1), event-driven wake-triggered flow (with & without tail), regressions (send flow, alarm tab, voice-auto-hint, DUR TTS button surface), and HUD layout (height=290 >= 280) all verified. No JS console errors during full flow.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "TopLeftHUD (wake-word-toggle)", "issues": ["Enabled state jumps directly from disabled (muted) to emerald/active because Chromium supports webkitSpeechRecognition and listener.start() succeeds immediately — the intermediate yellow (enabled-but-not-active) state is hard to observe in Playwright. Not a bug, but worth noting: in production Firefox/mobile browsers the emerald state would never appear because SR isn't supported; the code correctly falls back to an error toast + disables the setting. Verified this fallback works."]}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "wakeWord.js: rec.onend restart on 'aborted' error path could tight-loop if permission is denied silently. The 'not-allowed' branch correctly stops, but if start() throws synchronously (e.g. AbortError) inside setTimeout callback of onend, the error is swallowed. Consider tracking a failure counter and giving up after N restarts.",
+    "SertexMain.jsx handleSend: resumeWakeListener() is called inside try, catch and finally-equivalent paths — good. But wakePendingResumeRef is only set inside the wake onWake callback; if a wake-triggered command times out or errors before handleSend runs, the ref may stay true and cause an unwanted resume on the next manual send. Consider clearing the ref on wakeEnabled=false and on any early return in handleSend.",
+    "HUDOverlay.jsx line 151: The text 'SERTEX'İ DİNLE' repeats identically in enabled-non-active and disabled states — only color changes. For accessibility, consider adding an aria-pressed attribute or distinct sr-only text so screen readers can convey state.",
+    "InputBar.jsx line 38-55: The useEffect for wake event listener depends on [listening, transcribing, disabled] — every time these change the listener is torn down and re-added. That's fine for a lightweight window listener, but it means a wake event that fires DURING a state transition could be missed. Consider using refs for the guards instead of dependency array."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "not tested (frontend-only per request)", "frontend": "100%"},
+  "test_credentials": "serkan / 19071987 (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Wake-word feature is fully functional. localStorage key: sertex_wake_settings_v1 with { enabled: bool }. Custom events: sertex:wake-triggered (from wakeWord listener; detail.tail is optional command text) and sertex:wake-settings-changed (fires on toggle). InputBar listens for wake-triggered and auto-calls startListening(); if detail.tail is non-empty it seeds the chat-input state. Testing tip: dispatch the custom event via page.evaluate to bypass real STT audio pipeline — that's what these tests do. Grant ['microphone'] permission on the page origin so getUserMedia + SpeechRecognition succeed in Chromium. Known flakiness: clicking wake-word-toggle immediately after closing the Settings modal via Escape may miss the first click due to modal unmount timing — wait ~500ms or click Settings' close button explicitly. Also note: the enabled-but-not-active (yellow) visual state is essentially unobservable in Chromium because SR.start() succeeds synchronously — you'll see either muted (disabled) or emerald (enabled+active).",
+  "rca of the issue": "N/A — no bugs found. All 11 requested scenarios validated:\n  1. DUR button + send flow — send works, assistant reply visible.\n  2. Chat input + send — user + assistant messages appear.\n  3. Settings alarm tab — [data-testid=alarm-tab-content] visible after opening.\n  4. Auto-VAD hint — [data-testid=voice-auto-hint] shows 'KONUŞUN — SUSUNCA OTOMATİK GÖNDERİLİR'.\n  5. Wake toggle exists in TopLeftHUD bottom row, initial text 'SERTEX'İ DİNLE', muted appearance (border-sertex-cyan/25 text-sertex-textMuted).\n  6. Click to enable: localStorage → {\"enabled\":true}, toast 'Uyandırma kelimesi aktif — Sertex de yeter', class contains border-emerald-400 (wakeActive=true since Chromium supports SR).\n  7. Click to disable: localStorage → {\"enabled\":false}, class returns to text-sertex-textMuted.\n  8. Dispatch sertex:wake-triggered with tail='' → mic-button gains sertex-danger border (listening=true), voice-auto-hint appears, no console errors.\n  9. Dispatch with tail='bugün hava nasıl' → chat-input.value = 'bugün hava nasıl', mic listening, no errors.\n  10. SR-undefined path (window.SpeechRecognition=undefined; window.webkitSpeechRecognition=undefined) → toggle click triggers useEffect fallback which calls saveWakeSettings({enabled:false}) and shows error toast. Verified localStorage returns to {\"enabled\":false} and no runaway state.\n  11. hud-top-left bounding box: height=290 (>=280 required); both wake-word-toggle and open-settings visible in same bottom row without overlap.\n  Zero console errors across the full run."
+}

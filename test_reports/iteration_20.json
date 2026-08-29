@@ -1,0 +1,36 @@
+{
+  "summary": "Frontend-only verification for sidebar docking + HUD panel bounds fix (Sertex). All 7 acceptance criteria PASS. (1) Dock-cycle button rotates right(SAĞ)→bottom(ALT)→left(SOL)→top(ÜST)→right(SAĞ) with toast 'Panel konumu: X'; localStorage 'sertex_sidebar_dock_v1' persists SOL across full page reload. (2) Sidebar anchors correctly in each dock: SAĞ (top-right, full-height, w=440, right=1920), SOL (top-left, full-height), ÜST (spans full width, h=380 anchored top), ALT (spans full width, h=380 anchored bottom); hud-bounds div correctly shrinks to non-sidebar area in each dock (15/15 geometry assertions pass). (3) Toggle button repositions per dock (mid-right/mid-left/top-center/bottom-center) and closes+reopens in all 4 docks. (4) Resize handles present per dock (SAĞ→sidebar-resize-left, SOL→right, ÜST→bottom, ALT→top). (5) KEY FIX — dragging SERTEX·SİSTEM panel toward the docked sidebar is CLAMPED: SAĞ panel.right stopped at 1480 = iw−sb.w=1480; SOL panel.x clamped to 440 = sb.w; ÜST panel.y clamped to 380 = sb.h; ALT panel.bottom stopped at 700 = ih−sb.h. When sidebar is closed, panel drags freely to the edge (right=1920). (6) Regression chip-side: after dock=ALT + drag panel to right half (center_x=1366>960), hide → chip appears on RIGHT edge (x=1778, style.right='0px'); after moving panel to left half (center_x=350), hide → chip appears on LEFT edge (x=0, style.left='0px'). (7) All 5 sidebar tabs (history/tasks/memory/files/notes) clickable in all 4 docks (20/20). Overdue modal not present in DOM at test time (expected: no overdue tasks).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "HUD panels vs sidebar dock switch",
+        "issues": [
+          "Panels are NOT retroactively repositioned when the user switches the dock. Example flow: with dock=SAĞ the panels sit at top-left (default x=16, y=16). If the user then switches to dock=SOL, the panels remain at x=16 which is now BEHIND the left sidebar (0..440), making them inaccessible until the sidebar is closed OR the dock is switched back. Same for ÜST (panels at y=16 hidden behind top sidebar). Bounds constraint only applies during active drag — pre-existing positions outside the new bounds are not auto-clamped. Consider: on dock change, iterate all persisted window positions and clamp them into the new hud-bounds rect (in Sidebar.jsx cycleDock or an effect on `dock` change). Currently a UX foot-gun for the primary use case."
+        ]
+      }
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "OPTIONAL UX: on dock change, auto-clamp existing panel positions (topleft, topright, bottomleft) into the new hud-bounds rect and persist. Otherwise switching dock from SAĞ → SOL/ÜST leaves panels stranded behind the newly-docked sidebar until the user closes the sidebar."
+  ],
+  "critical_code_review_comments": [
+    "Sidebar.jsx line 236-244: boundsStyle.zIndex=-1 works but combined with pointer-events:none the div is purely a geometric reference for react-rnd. That is fine, but note that react-rnd's `bounds` selector resolves at drag START (not continuously), so if the user resizes the sidebar during a drag the panel could exceed the new bounds — acceptable edge case.",
+    "Sidebar.jsx line 253: `startH = dims.height ?? (isHorizontal ? DEFAULT_SIDEBAR_HORIZ_HEIGHT : window.innerHeight)` — for vertical (right/left) docks, startH is set to window.innerHeight but height is not actually resizable in those docks (resizeInner.axis='x'). Harmless but slightly misleading.",
+    "Sidebar.jsx line 271: `setDims((prev) => ({ ...prev, width: nextW, height: nextH ?? prev.height }))` uses functional updater with the outer-scope nextH — fine, but the `nextH ?? prev.height` clause always evaluates to nextH because nextH is defaulted to dims.height above. Slight redundancy.",
+    "Sidebar.jsx: On dock change no effect runs to re-clamp already-persisted HUD panel positions. Since DraggablePanel uses `bounds='#hud-bounds'` only at drag-time, a panel persisted at x=16 (behind a newly-docked left sidebar) remains there. Consider dispatching a custom event on dock change so DraggablePanel instances can force-clamp their pos.",
+    "DraggablePanel.jsx line 111-112: window.innerWidth/window.innerHeight are read on every render but no resize listener triggers re-render. If user resizes the browser after hiding a panel, the chip position won't reflow. Pre-existing minor issue (also flagged in iteration_19).",
+    "DraggablePanel.jsx line 147-148: maxWidth/maxHeight use `window.innerWidth-20` computed at render — same resize-listener caveat; also this doesn't factor in the sidebar width, so an extremely wide panel could still momentarily exceed hud-bounds before being clamped by react-rnd during drag."
+  ],
+  "updated_files": [],
+  "success_rate": {"frontend": "100% (all 7 acceptance-criteria groups PASS; 55+ individual assertions across dock-cycle, persistence, geometry, toggle position, close/reopen, resize handles, KEY-FIX bounds in 4 docks + sidebar-closed free-drag, chip-side regression both sides, and 20 tab-click paths)"},
+  "test_credentials": "serkan / 19071987",
+  "seed_data_creation": "None. localStorage keys cleared before each run: 'sertex_sidebar_dock_v1', 'sertex_sidebar_dims_v1', 'sertex_windows_v1'.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Sidebar docking + panel-bounds fix works as spec'd. Key testids: [data-testid='sidebar'], [data-testid='sidebar-toggle'], [data-testid='sidebar-dock-cycle'] (text is one of SAĞ/ALT/SOL/ÜST), [data-testid='sidebar-resize-{left|right|top|bottom}'], [data-testid='hud-bounds'], [data-testid='hud-top-left'|'hud-top-right'|'hud-bottom-left'] with -header/-hide/-restore/-minimize/-palette suffixes. Cycle order is right→bottom→left→top→right (matches DOCK_NEXT map in Sidebar.jsx line 34). GOTCHA: react-rnd `bounds='#hud-bounds'` only applies DURING drag, so if a panel is at a position OUTSIDE the current bounds (e.g., previously placed near top-left, then user docks sidebar to LEFT), the panel is NOT auto-relocated — it stays behind the sidebar and is inaccessible until the sidebar is closed or dock changed back. This is the only non-blocking UX gap identified. All primary acceptance criteria PASS.",
+  "rca of the issue": "N/A — this iteration is a feature verification, not a bug fix. The core mechanism: Sidebar.jsx renders a fixed div #hud-bounds whose rect equals the non-sidebar area (right: 0/left: 0/top: 0/bottom: 0 minus the sidebar side when open). DraggablePanel uses react-rnd with bounds='#hud-bounds' so drags are constrained. On dock cycle (button 'sidebar-dock-cycle'), state updates asideStyle + boundsStyle simultaneously so the geometry stays consistent. Toggle button `toggleStyle` places itself at the inner edge of the current dock and its icon (ChevronRight/Left/Up/Down) is chosen from ToggleIconOpen/Closed variables set per dock branch."
+}

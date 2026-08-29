@@ -1,0 +1,33 @@
+{
+  "summary": "Frontend-only testing of the new bulk 'İŞ KOLU AĞAÇLARINI AÇ/KAPAT' button in the Görevler panel. The core feature works: button appears when hierarchical categories exist, label toggles correctly, expand-all opens tree panels on the 2 seeded hierarchical task cards (c7a20d73, eb0c0b7f) showing 'Fason Verme → QA_AltKol2', collapse-all closes them, localStorage 'sertex_cattree_expanded_v1' persists the set of expanded task IDs per user, and after reload the previously expanded trees remain open. Per-card task-category-expand/collapse still works. Regression on task-collapse-all (TÜMÜNÜ KÜÇÜLT/BÜYÜT) is unaffected. However, a STATE-SYNC BUG was found: on page reload, the bulk button's internal `allTreesOpen` state is initialized to `false` regardless of what is in localStorage, causing (a) the label to be wrong (shows 'AÇ' even when all trees are currently open) and (b) the first click after reload is a no-op visually (label flips to 'KAPAT' but trees remain expanded because the dispatched event carries expanded=true again); the user must click a SECOND time to actually collapse.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "TasksPanel.jsx (cattree-toggle-all)",
+        "issue": "allTreesOpen is initialized as useState(false) and never rehydrated from the persisted per-user localStorage set. After a reload with trees expanded (persisted), the button label incorrectly reads 'İŞ KOLU AĞAÇLARINI AÇ' and the first click dispatches expanded=true (no visible effect), so a second click is required to collapse.",
+        "selector": "[data-testid=\"cattree-toggle-all\"]",
+        "priority": "MEDIUM"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/test_reports/iteration99_final.png"],
+  "action_items": [
+    "Fix state sync in TasksPanel.jsx: initialize `allTreesOpen` based on whether the persisted expanded-set for currentUser is non-empty (or derive from categories/tasks). Suggested: read getCatTreeExpandedSet(currentUser?.id) on mount and set allTreesOpen accordingly; also subscribe to updates when individual cards toggle, so the bulk label stays in sync.",
+    "CLEANUP NOT DONE by testing agent (auth via httpOnly cookie made in-browser fetch return 401). Main agent should PATCH tasks c7a20d73-372e-4e0b-8064-e8db969c1d9e and eb0c0b7f-8522-4bf0-80af-53f421a75dda category_id back to 'dad15459-f463-40ec-876c-817577e5d811' (Fason Verme), then DELETE category 2366577d-f748-41e1-b21f-9b1fdb26573d (QA_AltKol2)."
+  ],
+  "critical_code_review_comments": [
+    "Bulk-toggle state (`allTreesOpen`) is a UI-only flag not derived from the source of truth (localStorage set). Should be computed/rehydrated so label and behavior match reality after reload or after per-card toggles.",
+    "Consider having TaskCard also emit a 'sertex:cattree-single-changed' event so TasksPanel can update allTreesOpen when a user manually opens all cards one-by-one (nice-to-have)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A", "frontend": "83% (5/6 acceptance criteria pass; PERSISTENCE partially fails on label/first-click after reload)"},
+  "test_credentials": "serkan / 19071987 (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "None created by testing agent — used the pre-seeded QA_AltKol2 category and 2 tasks provided in the review request.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "The bulk button expand/collapse works within a single session. The persistence layer (localStorage sertex_cattree_expanded_v1) works. The only defect is that on fresh page load `allTreesOpen` local state doesn't rehydrate from localStorage, causing a wrong label and a no-op first click when trees are already open. When retesting, verify: (1) label after reload matches actual state; (2) single click after reload correctly collapses all trees when they were persisted as open.",
+  "rca of the issue": "TasksPanel.jsx line 1461: `const [allTreesOpen, setAllTreesOpen] = useState(false);` — always starts false. On mount there is no effect that reads the persisted per-user cattree set (via catTreePrefs.js) to initialize allTreesOpen. So after reload with previously-expanded trees, clicking cattree-toggle-all flips false→true and dispatches {expanded:true}; TaskCard's listener sets catTreeOpen=true (already true), no visible change. User must click again for false→ dispatch expanded=false. Fix: on mount, read the persisted set for currentUser?.id; if it contains any of the currently-visible hierarchical task ids, set allTreesOpen=true. Or better: derive allTreesOpen from `visibleHierTaskIds.every(id => persistedSet.has(id))`."
+}

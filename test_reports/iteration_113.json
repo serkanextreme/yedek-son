@@ -1,0 +1,41 @@
+{
+  "summary": "RETEST of iteration_112 blocking upload bug (FAZ B2 wave-1 Task Attachments, mobile Expo web preview). Fix in /app/mobile/src/api/client.ts uploadAttachment() (Platform.OS==='web' branch that fetches uri -> Blob and appends real Blob with filename) is CONFIRMED WORKING. All requested flows pass on mobile web preview: image upload via Galeri, document upload via Dosya, EKLER (n) count increments, image thumbnail renders, full-screen preview modal opens on tap and closes via task-detail-attach-preview-close, delete flow with 'Dosyayı sil?' confirm + task-detail-attach-delete-confirm removes items and updates count, empty state 'Henüz dosya yok.' renders, friendly Turkish error surface (no raw Pydantic JSON leaked), and SAHİP/Devret regression intact. Kamera skipped per handoff (native only).",
+  "platforms_tested": ["mobile"],
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "mobile": {
+      "ui_bugs": [],
+      "integration_issues": [],
+      "design_issues": [],
+      "react_native_issues": [
+        {"component": "react-native-web pointerEvents", "issue": "Non-blocking deprecation warning still present app-wide: 'props.pointerEvents is deprecated. Use style.pointerEvents'. Not caused by AttachmentsSection; pre-existing from prior iterations."}
+      ]
+    }
+  },
+  "parity_issues": [],
+  "test_report_links": [
+    "/app/test_reports/iter113_mobile/01_empty.jpeg",
+    "/app/test_reports/iter113_mobile/02_after_image.jpeg",
+    "/app/test_reports/iter113_mobile/03_after_txt.jpeg",
+    "/app/test_reports/iter113_mobile/05_after_delete.jpeg",
+    "/app/test_reports/iter113_mobile/06_preview_open.jpeg"
+  ],
+  "action_items": [
+    "No blocking action required for FAZ B2 wave-1 Task Attachments — feature is production-ready on mobile web preview. Recommend a follow-up native (Expo Go / dev-client) smoke run to confirm the RN branch (form.append('chunk', {uri,name,type})) still works, since only the web branch was retested here.",
+    "Optional polish: pressing on the row background (outside the filename/thumbnail text) does not open the preview because the outer View wraps the inner Pressable (styles.itemBody). Consider enlarging the Pressable to fill the row for a friendlier touch target — non-blocking."
+  ],
+  "critical_code_review_comments": [
+    "client.ts:171-184 fix is correct and minimal — Platform.OS==='web' branch converts picked uri to a real Blob before FormData.append('chunk', blob, file.name). Both image (Galeri, blob:) and DocumentPicker (Dosya, data:/blob:) URIs are fetchable in the browser so this covers both entry points.",
+    "AttachmentsSection.tsx:99-105 now catches upload failures and shows a friendly 'Dosya yüklenemedi.' — verified no raw Pydantic/422 body leaks in UI.",
+    "attach delete confirm button now exposes task-detail-attach-delete-confirm testID (line 351) — matches the new contract from iter112 handoff.",
+    "Minor: AttachmentsSection still uses expo-file-system/legacy for document download+share; flag for migration to the new expo-file-system API in a later cleanup pass (non-blocking)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (skipped per request)", "frontend": "100% — all 6 requested behaviors verified on mobile web preview"},
+  "test_credentials": "serkan / 19071987 (admin) via Expo web preview at https://sertex-enterprise.expo.preview.emergentagent.com",
+  "seed_data_creation": "Created two TEMP tasks via UI (task-create-fab -> task-form-save-button): TMP-ATTACH-1785942771 (used for upload+delete flow) and TMP-PREV-1785942864 (used for preview modal). BOTH deleted at end of their runs via task-detail-delete-button + task-detail-delete-confirm. Attachments were also deleted as part of the delete flow test. No residual data on the backend.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Attachment upload on Expo web preview is fully working after the Platform.OS branching fix in client.ts. Test files used: /app/test_reports/testfiles/probe.png (100x100 red PNG, 287B) and /app/test_reports/testfiles/probe.txt (23B). To trigger the preview modal, tap the FILENAME TEXT inside the row (page.get_by_text('probe.png')) — clicking the outer View testID task-detail-attach-item-<id> does NOT trigger openItem because the outer View wraps the inner Pressable. Delete flow uses testID task-detail-attach-delete-<id> then task-detail-attach-delete-confirm. Kamera is native-only, cannot be tested via web preview. Native (RN) branch of uploadAttachment was NOT retested here — recommend a native smoke check before shipping.",
+  "rca of the issue": "Fix RCA: The iter112 blocker was that react-native-web's DOM FormData.append(name, value) stringifies non-Blob values via String(value), so the RN-only {uri,name,type} object became the literal string '[object Object]' on the wire, and FastAPI's UploadFile parser rejected it with a 422 value_error. The applied fix in /app/mobile/src/api/client.ts:171-184 wraps the file part in a Platform.OS branch: on 'web' it does `const blob = await (await fetch(file.uri)).blob(); form.append('chunk', blob, file.name)` so a real Blob (with the correct filename param) reaches the server, and on native it keeps the original RN shape. Verification steps run: (1) login as serkan on web preview, (2) create TMP task, (3) '+ Ekle' -> 'Galeri' -> probe.png -> row renders with red thumbnail + '287 B · serkan' + EKLER (1), (4) '+ Ekle' -> 'Dosya' -> probe.txt -> second row + EKLER (2), (5) tap 'probe.png' filename -> full-screen preview opens showing red image + filename caption, (6) tap task-detail-attach-preview-close -> modal closes, (7) tap task-detail-attach-delete-<id> -> 'Dosyayı sil?' confirm modal appears, (8) tap task-detail-attach-delete-confirm -> row removed + count drops to EKLER (1). No 422, no raw JSON leak."
+}

@@ -1,0 +1,47 @@
+{
+  "summary": "Iteration 122 — Arşiv v2 frontend (web + mobile) end-to-end verified. All 8 checklist items PASS. Web: SettingsPanel Arşiv tab renders 3 policy radios + autoclean toggle + day chips (7/15/30/60/90/Özel + Uygula). Toggling policy → 'Ayar kaydedildi' toast. With policy=required + autoclean=30 enabled, DELETE without reason returns 400 (backend enforcement working). Cancel-with-reason and delete-with-reason show correctly in archive: task-cancel-reason-<id> = 'İptal nedeni: Müşteri iptal etti', task-delete-reason-<id> = 'Silme nedeni: Sipariş iptal', task-autoclean-<id> = '30 gün sonra kalıcı silinecek'. Sort chips (Yeni/Eski/A-Z) and archive-internal search filter correctly. Global search (active view) shows 'ARŞİVDE BULUNANLAR' section with archive-search-row-<id> rows that navigate to the correct archive group. archive-empty-trash & ctx-permanent-delete visible for admin. UserLockPolicyModal shows archive-caps-section with all 3 toggles (archive-cap-perm_delete/-empty_trash/-manage_policy) for admin. Mobile: /archive route shows archive-screen with archive-group-done/-cancelled/-deleted chips, archive-search-input, and archive-sort-new/-old/-az; archive-empty-trash-button correctly hidden when deleted=0. Task detail exposes task-detail-cancel-button + task-detail-delete-button. Backend cleanup performed (policy reset to optional, autoclean disabled, all TEST_ tasks purged).",
+  "platforms_tested": ["web", "mobile"],
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "web": {
+      "ui_bugs": [],
+      "integration_issues": [],
+      "design_issues": []
+    },
+    "mobile": {
+      "ui_bugs": [],
+      "integration_issues": [],
+      "design_issues": [],
+      "react_native_issues": []
+    }
+  },
+  "parity_issues": [],
+  "test_report_links": [
+    "/app/test_reports/iter122_policy_set.jpeg",
+    "/app/test_reports/iter122_cancelled_group.jpeg",
+    "/app/test_reports/iter122_deleted_group2.jpeg",
+    "/app/test_reports/iter122_global_search.jpeg",
+    "/app/test_reports/iter122_archive_caps.jpeg",
+    "/app/test_reports/iter122_mobile_archive.jpeg",
+    "/app/test_reports/iter122_mobile_deleted.jpeg",
+    "/app/test_reports/iter122_mobile_task_detail.jpeg"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "All spec testIDs verified live in the DOM on both platforms (web: settings-tab-archive, policy-{optional,required,off}, autoclean-toggle, autoclean-day-{7,15,30,60,90,custom,apply}, archive-caps-section, archive-cap-{perm_delete,empty_trash,manage_policy}, prompt-input, task-cancel-reason-<id>, task-delete-reason-<id>, task-autoclean-<id>, archive-sort + archive-sort-{new,old,az}, task-search-input, archive-search-results, archive-search-row-<id>; mobile: archive-screen, archive-group-{done,cancelled,deleted}, archive-search-input, archive-sort-{new,old,az}, archive-empty-trash-button, task-detail-cancel-button, task-detail-delete-button).",
+    "Backend policy=required is enforced at API layer: raw DELETE /api/tasks/<id> without reason returned HTTP 400 as expected.",
+    "Autoclean days label correctly formatted in Turkish: '30 gün sonra kalıcı silinecek'.",
+    "Global search integration: setting task-search-input while in active view triggers /api/tasks/search?scope=archive and renders archive-search-results; row click flips showArchived=true and jumps to the correct group.",
+    "Admin gating verified live: archive-empty-trash and archive-caps-section both render for serkan (admin).",
+    "Low-severity carry-over from previous iterations: TasksPanel.jsx is ~2729 lines — recommend future refactor/splitting (not blocking).",
+    "Minor: `task-search-input` is a single testID reused across active view and archive view; both flows work correctly but tests should be aware the same selector filters different lists depending on showArchived state."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "not tested (skip backend per handoff — backend 9/9 pytest + curl e2e already passed)", "frontend": "100% (8/8 checklist items pass on web + mobile)"},
+  "test_credentials": "serkan/19071987 (admin) used; emp1_test/mgr_test not needed because admin-side archive-caps modal was verified directly.",
+  "seed_data_creation": "Created 3 TEST_ tasks (TEST_cancel_flow, TEST_delete_flow, TEST_block) via API to drive UI; all permanent-deleted at teardown. Global policy reset to {optional, autoclean disabled, 30 days} and no archive-caps were granted, so environment is clean.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Arşiv v2 feature is fully wired and verified live on both web (multi-tenant-saas-77.preview) and Expo web (multi-tenant-saas-77.expo.preview). If regressing later: (1) admin login → open sidebar (data-testid=sidebar-toggle) → tab-tasks → archive-toggle to reach chips; (2) AYARLAR → settings-tab-archive for policy/autoclean; (3) AYARLAR → settings-tab-users → admin-lock-<username> to reach ARŞİV YETKİLERİ; (4) mobile /archive route + task detail buttons. Backend endpoints: PUT /api/tasks/settings, PATCH /api/users/{uid}/archive-caps, DELETE /api/tasks/{id}?reason=, POST /api/tasks/{id}/cancel {reason}.",
+  "rca of the issue": "N/A — no defects found."
+}

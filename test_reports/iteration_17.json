@@ -1,0 +1,33 @@
+{
+  "summary": "Post-rename regression test (Sertex -> Sertex) — 100% pass. Verified source code is clean of 'sertex' in all .js/.jsx/.py/.css/.json/.md files. Backend: 36/36 pytest cases pass across test_memory_and_stt.py + test_tasks.py + test_impersonation.py (identity test asserts reply contains 'sertex' and NOT 'sertex' — passed). Frontend: login screen renders (S.E.R.T.E.X title, cyan #00F0FF, bg #02040A), all 4 sidebar tabs (GEÇMİŞ/GÖREVLER/HAFIZA/NOTLAR) clickable and styled correctly, chat replies to 'Merhaba' in Turkish with 0 sertex references, chat identity 'Kısaca kendini tanıt' response is 'Ben Sertex,...' (contains 'sertex', no 'sertex'), memory/settings panels open cleanly. Zero console errors. Only one DOM occurrence of 'Sertex' text found: an old conversation TITLE ('Merhaba Sertex, adım Test...') from a prior impersonation test — this is persisted user-generated content, NOT a rename regression, and is expected behavior.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/pytest/iter17_identity.xml",
+    "/app/test_reports/pytest/iter17_regression.xml",
+    "/app/backend/tests/test_impersonation.py",
+    "/app/backend/tests/test_memory_and_stt.py",
+    "/app/backend/tests/test_tasks.py"
+  ],
+  "action_items": [
+    "OPTIONAL: If desired, main agent could offer a one-time cleanup script or UI action to delete old conversations that contain the string 'Sertex' in their title. Currently there is one such stale conversation from prior testing visible in the GEÇMİŞ sidebar ('Merhaba Sertex, adım Test...'). This is not a bug — user is free to type anything — but flagged in case product wants a pristine demo. Not blocking."
+  ],
+  "critical_code_review_comments": [
+    "Post-rename hygiene is clean: verified `grep -ri sertex` on frontend/src and backend/ returns only the .pyc bytecode which contains the forbidden_name regression guard string (expected).",
+    "tailwind.config.js theme namespace 'sertex.*' resolves correctly — computed colors match design tokens (bg=#02040A, cyan=#00F0FF).",
+    "Backend tests already existed and required no changes; identity assertion updated in test_impersonation.py:272 uses split-string trick (forbidden_name = 'j' + 'arvis') so pyc doesn't accidentally match source-file scans — nice touch.",
+    "Repeat of prior code review items still applies (memory_service.list_memories triple-sort at lines 262-264; save_memory near-duplicate scan loads up to 500 docs per write; /api/stt/whisper reads full body before size check). None are new regressions from this rename."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (37/37)", "frontend": "100%"},
+  "test_credentials": "serkan / 19071987",
+  "seed_data_creation": "No new seed data created. Existing test artifacts from iteration_16 still present (TEST_* memories, sample conversations). One legacy conversation title contains 'Sertex' (see action_items).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Rename verification complete — no regressions. Backend pytest suites are healthy. Key data-testids for future frontend runs: login-username, login-password, login-submit, tab-history, tab-tasks, tab-memory, tab-notes, chat-input, send-button, msg-assistant, msg-user. The chat 'Merhaba' round-trip takes 3-6s. The identity check 'Kısaca kendini tanıt' takes 5-10s. Note that /api/chat responses may be slower on cold LLM calls — allow up to 25s in tests. Login credentials remain serkan / 19071987.",
+  "rca of the issue": "No issues to root-cause. The single 'Sertex' string found in the DOM (in the sidebar conversation history) is user-content persisted from a previous impersonation test where the tester intentionally typed the word Sertex as a chat message. It is not rendered from any static UI string, not from the tailwind config, not from server-side prompts, and not from any component code. The user data storage correctly preserves whatever the user typed — this is by design, and the LLM's system prompt now prevents the AI itself from ever identifying as Sertex (verified)."
+}

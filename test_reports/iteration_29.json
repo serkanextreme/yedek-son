@@ -1,0 +1,35 @@
+{
+  "summary": "Faz 3 Chart Preview enhancement — POST /api/excel/{id}/chart-data endpoint + RechartsChart.jsx + Önizle/Yenile buttons in ExcelModal Charts tab. Backend: added 13 new tests to /app/backend/tests/test_excel.py (TestExcelChartData) covering auth, isolation, sum/mean/count aggregations, y-omitted → size(), non-numeric y → count fallback, missing sheet/x/y → 400 with exact Turkish detail, limit clamping (1..200), agg aliases (avg→mean). Full suite = 34/34 PASS in 122s. Frontend: uploaded 10-row Turkish xlsx as serkan, opened ExcelModal, switched to Grafik tab → 5 LLM-suggested chart cards (column/line/bar/scatter/pie) rendered with data-testid chart-suggestion-{i}. Clicked Önizle-0 → live recharts SVG rendered in chart-canvas-0 with 1 rect (bar). Canvas-1 (line): 1 path + 5 dots (circles). Canvas-2 (bar): rects. Canvas-3 (scatter): 10 path dots. Canvas-4 (pie): 5 labeled slices. Button label correctly toggled 'Önizle'→'Yenile' after loading; clicking Yenile re-fetches and SVG persists. Screenshots confirm cyan Sertex theme (axis stroke #67e8f9, colored bars, dot markers). Error path verified via direct fetch: bad column → 400 with Turkish detail 'X sütunu bulunamadı' (or 'Sayfa bulunamadı' when sheet name mismatches openpyxl default 'Sheet').",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_excel.py",
+    "/app/test_reports/pytest/iter29_chart_data.xml",
+    "/app/test_reports/pytest/iter29_excel_full.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "excel_service.py chart_data(): _AGG_MAP normalises sum/mean/avg/average/count/min/max/median correctly. Non-numeric y with agg=sum silently falls back to count (agg field also reflects 'count' in response — verified). NaN → 0 for y, NaN → None for x. datetime x correctly isoformat-ed. Sort desc + limit head — matches spec.",
+    "excel_router.py chart_data_endpoint: max(1, min(req.limit, 200)) clamps limit range. ValueError → 400 with str(e) preserves the Turkish detail from chart_data() (X sütunu bulunamadı / Y sütunu bulunamadı / Sayfa bulunamadı) — verified via tests.",
+    "excel_router.py: chart-data endpoint reuses _load_owned_workbook — same ownership + category=spreadsheet + 401/403/404/400/502 guards as the other 5 endpoints. DRY. Cross-user still returns 404 (verified).",
+    "RechartsChart.jsx: cyan Sertex theme (#22d3ee, #38bdf8, #60a5fa, ...); ResponsiveContainer height=260; supports bar/column/line/area/scatter/pie; empty-data guard renders 'Bu grafik için veri yok.' — solid defensive rendering.",
+    "ExcelModal.jsx loadChartData(): agg selection heuristic (pie/bar/column/area/line → sum, else mean) is reasonable. chartDataMap keyed by suggestion index — no collision. chartLoadingIdx guards concurrent clicks. Button label 'Önizle'/'Yenile' toggle is derived from chartDataMap[i] presence — clean.",
+    "lib/api.js excelApi.chartData(id, params): thin wrapper over POST /excel/{id}/chart-data. Consistent with the other excel methods.",
+    "MINOR observation (non-blocking): ExcelModal.jsx is now 545 lines — still cohesive but approaching split threshold. Consider extracting Charts tab into a subcomponent in a future iteration.",
+    "MINOR observation (non-blocking): Runtime error overlay 'Cannot close a closed AudioContext' appears in dev mode from a pre-existing STT/TTS code path — unrelated to Faz 3 chart preview, but it can visually intercept clicks in dev; consider guarding audioCtx.close() with a state check."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_excel.py (added TestExcelChartData class — 13 new tests; total suite now 34 tests)"
+  ],
+  "success_rate": {"backend": "100% (34/34 in test_excel.py; 13/13 new chart-data tests)", "frontend": "100% (5 chart types all rendered: column, line, bar, scatter, pie; Önizle→Yenile toggle OK; refresh OK; error path OK)"},
+  "test_credentials": "serkan / 19071987 (admin, seeded). ahmet / ahmet123 (auto-provisioned as needed).",
+  "seed_data_creation": "Each run uploads TEST_recharts_sample.xlsx (5.3 KB, 10 Turkish rows) + a secondary TEST_textY_*.xlsx (text-y-column) via /api/files; both are deleted in the module fixture teardown and via UI teardown block. No persistent test data left.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Chart-data endpoint is fully covered by TestExcelChartData in /app/backend/tests/test_excel.py. Run with: cd /app/backend && python -m pytest tests/test_excel.py -v -n 2 (uses parallel workers; ~120s total). Frontend: openpyxl-generated xlsx has sheet name 'Sheet' (not 'Sheet1'); when writing chart-data requests, first fetch analyze to read the actual sheet name from data.schema[0].sheet — this is what ExcelModal.loadChartData does via the suggestion's c.sheet field. LLM chart suggestion latency can occasionally exceed the k8s ingress timeout (~60s) causing 502; retrying works. Pre-warming via direct fetch to /charts is a reliable workaround for playwright flows.",
+  "rca_of_the_issue": "N/A — no bugs found. Chart Preview enhancement fully meets every requirement: endpoint contract, Turkish error messages, agg normalisation, non-numeric fallback, y=None sizing, limit clamping, auth+isolation, and live recharts rendering with correct chart type per LLM suggestion (bar/column/line/scatter/pie) including button state transitions."
+}

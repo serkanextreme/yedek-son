@@ -1,0 +1,60 @@
+{
+  "base_url": "https://functional-themes.preview.emergentagent.com",
+  "cases": [
+    {
+      "case": "hotmail.com",
+      "ok": true,
+      "detail": "Bağlantı başarısız: Microsoft, kişisel Hotmail/Outlook hesaplarında IMAP/SMTP + App Password ile bağlantıyı Eylül 2024'ten itibaren kapattı. Artık yalnızca OAuth 2.0 destekleniyor. Alternatif: Gmail hesabı kullanın (App Password sorunsuz çalışıyor) veya Sertex'e Microsoft OAuth entegrasyonu ekletin.",
+      "status": 400,
+      "body": {
+        "detail": "Bağlantı başarısız: Microsoft, kişisel Hotmail/Outlook hesaplarında IMAP/SMTP + App Password ile bağlantıyı Eylül 2024'ten itibaren kapattı. Artık yalnızca OAuth 2.0 destekleniyor. Alternatif: Gmail hesabı kullanın (App Password sorunsuz çalışıyor) veya Sertex'e Microsoft OAuth entegrasyonu ekletin."
+      },
+      "elapsed_sec": 0.2
+    },
+    {
+      "case": "outlook.com",
+      "ok": true,
+      "detail": "Bağlantı başarısız: Microsoft, kişisel Hotmail/Outlook hesaplarında IMAP/SMTP + App Password ile bağlantıyı Eylül 2024'ten itibaren kapattı. Artık yalnızca OAuth 2.0 destekleniyor. Alternatif: Gmail hesabı kullanın (App Password sorunsuz çalışıyor) veya Sertex'e Microsoft OAuth entegrasyonu ekletin.",
+      "status": 400,
+      "body": {
+        "detail": "Bağlantı başarısız: Microsoft, kişisel Hotmail/Outlook hesaplarında IMAP/SMTP + App Password ile bağlantıyı Eylül 2024'ten itibaren kapattı. Artık yalnızca OAuth 2.0 destekleniyor. Alternatif: Gmail hesabı kullanın (App Password sorunsuz çalışıyor) veya Sertex'e Microsoft OAuth entegrasyonu ekletin."
+      },
+      "elapsed_sec": 0.25
+    },
+    {
+      "case": "live.com",
+      "ok": true,
+      "detail": "Bağlantı başarısız: Microsoft, kişisel Hotmail/Outlook hesaplarında IMAP/SMTP + App Password ile bağlantıyı Eylül 2024'ten itibaren kapattı. Artık yalnızca OAuth 2.0 destekleniyor. Alternatif: Gmail hesabı kullanın (App Password sorunsuz çalışıyor) veya Sertex'e Microsoft OAuth entegrasyonu ekletin.",
+      "status": 400,
+      "body": {
+        "detail": "Bağlantı başarısız: Microsoft, kişisel Hotmail/Outlook hesaplarında IMAP/SMTP + App Password ile bağlantıyı Eylül 2024'ten itibaren kapattı. Artık yalnızca OAuth 2.0 destekleniyor. Alternatif: Gmail hesabı kullanın (App Password sorunsuz çalışıyor) veya Sertex'e Microsoft OAuth entegrasyonu ekletin."
+      },
+      "elapsed_sec": 0.31
+    },
+    {
+      "case": "msn.com",
+      "ok": true,
+      "detail": "Bağlantı başarısız: Microsoft, kişisel Hotmail/Outlook hesaplarında IMAP/SMTP + App Password ile bağlantıyı Eylül 2024'ten itibaren kapattı. Artık yalnızca OAuth 2.0 destekleniyor. Alternatif: Gmail hesabı kullanın (App Password sorunsuz çalışıyor) veya Sertex'e Microsoft OAuth entegrasyonu ekletin.",
+      "status": 400,
+      "body": {
+        "detail": "Bağlantı başarısız: Microsoft, kişisel Hotmail/Outlook hesaplarında IMAP/SMTP + App Password ile bağlantıyı Eylül 2024'ten itibaren kapattı. Artık yalnızca OAuth 2.0 destekleniyor. Alternatif: Gmail hesabı kullanın (App Password sorunsuz çalışıyor) veya Sertex'e Microsoft OAuth entegrasyonu ekletin."
+      },
+      "elapsed_sec": 0.33
+    },
+    {
+      "case": "generic_non_ms",
+      "ok": true,
+      "detail": "Bağlantı başarısız: IMAP giriş başarısız — e-posta veya app-password hatalı",
+      "status": 400,
+      "body": {
+        "detail": "Bağlantı başarısız: IMAP giriş başarısız — e-posta veya app-password hatalı"
+      },
+      "elapsed_sec": 0.15
+    }
+  ],
+  "accounts_after_failed_adds": {
+    "status": 200,
+    "body": []
+  },
+  "all_ok": true
+}

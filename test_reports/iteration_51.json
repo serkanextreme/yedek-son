@@ -1,0 +1,23 @@
+{
+  "summary": "Faz 8 CP4 retest — HIGH priority ReorderableTaskCard prop-forwarding bug from iter_50 is FULLY FIXED and VERIFIED. In the default (drag-enabled) render branch on Görevler tab with no filter active, right-clicking a task now shows the 'İş Koluna Taşı' (ctx-category) menu item, opens the ctx-category-submenu on click with ctx-category-none + ctx-category-pick-Kargolama + ctx-category-pick-Fason Verme, picking a category triggers toast + renders task-category-{id} badge on the card + updates category-chip counts in real-time. Plain TaskCard branch (with filter active) regression also passes. No new bugs introduced.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "TasksPanel.jsx still 2196 lines — split ReorderableTaskCard/TaskCard/ContextMenu into separate files to avoid future prop-forwarding drift between the two render branches.",
+    "Consider extracting the (categoryName + categories + onSetCategory) triple into a single memoized wrapper (e.g., withCategoryProps HOC or a hook) so drag and plain branches stay perfectly in sync going forward."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (frontend-only retest)", "frontend": "100% (drag branch fix + plain branch regression + filter chip counts + toast + badge all verified)"},
+  "test_credentials": "mgr_test/mgr12345 used; overdue modal must be dismissed via data-testid=\"overdue-alert-close\" before tab-tasks click (blocking overlay).",
+  "seed_data_creation": "No new seed. Reused existing 2 tasks + 2 categories (Kargolama, Fason Verme). Test category assignment reset to Kolsuz post-test to preserve clean state.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Fix verified via Playwright: (1) DRAG branch — right-click task → ctx-category present → click opens submenu → ctx-category-submenu + ctx-category-none + 2 ctx-category-pick-* items → click Kargolama → toast 'Görev → Kargolama' + [data-testid=task-category-{taskId}] badge rendered + KARGOLAMA chip count updates. (2) PLAIN branch (with category-chip-Kargolama filter active) — identical flow works. Note: the submenu opens on CLICK of ctx-category (not hover) — setCategorySub(true) is inside onClick handler. Overdue alert modal blocks the tab-tasks click after login; must click [data-testid=overdue-alert-close] first. iter_50 backend 57/57 test suite unchanged (backend untouched, only frontend prop pass-through added).",
+  "rca of the issue": "iter_50 root cause: ReorderableTaskCard invocation at TasksPanel.jsx line 2123 (drag-enabled default branch) omitted categoryName / categories / onSetCategory props. Since the plain TaskCard branch at line 2151 passed them correctly but was only used when filters were active, the default view (which most users see) hid 'İş Koluna Taşı' and never rendered the category badge. Fix (main agent, iter_51): added the three props identical to the plain branch at line 2137-2139. Reproduction is now impossible — verified both branches render the ctx-category submenu, both accept picks, both render the task-category-{id} badge."
+}

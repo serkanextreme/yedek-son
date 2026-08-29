@@ -1,0 +1,26 @@
+{
+  "summary": "Frontend-only re-verification of the ContextMenu portal fix in TasksPanel.jsx. Previous iteration_7 identified that the menu opened offscreen (~x=3245 in a 1920 viewport) because the parent <aside data-testid='sidebar'> has backdrop-filter: blur(16px) which per CSS spec establishes a new containing block for position:fixed descendants. E1 applied the recommended fix — the ContextMenu return now uses ReactDOM.createPortal(<motion.div .../>, document.body). This iteration confirms the fix works end-to-end. 15/15 assertions pass: (1) the menu's DOM parent is BODY, (2) it is NOT contained inside the sidebar aside, (3) getBoundingClientRect().left equals inline style.left exactly (diff=0.0px), (4) top diff is negligible (0.00025px), (5) the menu is fully within the 1920x1080 viewport (L=1704, R=1884, T=290, B=386), (6) Escape closes the menu, (7) outside click closes the menu, (8) real Playwright .click() (not JS click) on ctx-paused, ctx-pending, ctx-done, ctx-delete all succeed without 'element outside of viewport' errors, and (9) the full status transition flow works: pending → paused (yellow bg + BEKLEMEDE badge) → pending (badge removed) → done (emerald bg + line-through title) → delete (task removed from DOM). Screenshot confirms the menu visually renders next to the 3-dot button. Ready to ship.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Portal fix is correctly implemented: `createPortal(<motion.div ... data-testid='task-context-menu'>, document.body)` — the AnimatePresence exit animation still works because AnimatePresence wraps the ContextMenu invocation in the TaskCard, and the child is mounted/unmounted based on `ctx` state. Verified via screenshot that the menu animates in correctly.",
+    "The clamp `Math.min(x, window.innerWidth - 200)` inside the ContextMenu's style now works as intended because the menu is at document.body (viewport-relative) — matches the contract the code was written for.",
+    "onContextMenu (right-click) handler continues to use e.clientX/e.clientY viewport coords — also benefits from the portal fix without any additional change (not tested in this iteration since primary path is the 3-dot button, but the code path is identical to what was verified).",
+    "Minor: `Math.min(x, window.innerWidth - 200)` clamps to a hard-coded 200px width but the menu is min-w-[180px] and can be shorter for pending tasks (3 items). Not a bug, but if the menu ever grows past 200px on wider items, the clamp will under-shift. Consider using the actual rendered width or a slightly larger buffer.",
+    "The task-menu button uses `rect.left - 160` to position the menu — hard-coded offset. With min-w-[180px] the menu can extend 20px beyond the button's right edge. Consider `rect.right - menuWidth` for a cleaner right-align. Not blocking."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "skipped (frontend only)", "frontend": "15/15 = 100%"},
+  "test_credentials": "username=serkan, password=19071987 (working)",
+  "seed_data_creation": "Created TEST_UI_flow task during flow verification; deleted via the same ctx-delete flow being tested. No test data remaining.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "ContextMenu portal fix is verified and shipping-ready. All prior CRITICAL/HIGH bugs from iteration_7 are resolved. Menu is now portaled to document.body, escaping the sidebar's backdrop-filter containing block. If you need to re-verify: log in with serkan/19071987 → Görevler tab → click 3-dot on any task → assert menu's getBoundingClientRect().left == inline style.left AND parent is BODY, not the sidebar aside.",
+  "rca of the issue": "Root cause identified in iteration_7: sidebar <aside> uses .glass-panel which sets backdrop-filter: blur(16px), which per CSS spec makes it the containing block for all position:fixed descendants. Fix (applied by E1 and verified this iteration): wrap the ContextMenu's returned <motion.div> in ReactDOM.createPortal(..., document.body) so the menu is rendered outside the sidebar's DOM subtree. This restores the viewport-relative meaning of position:fixed + left/top. Verified: rect.left (1704px) == inline style.left (1704px), diff=0.0px, and menu is fully within the 1920x1080 viewport."
+}

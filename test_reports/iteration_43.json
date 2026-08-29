@@ -1,0 +1,30 @@
+{
+  "summary": "Faz 8 CP2 Frontend RBAC UI smoke test. Verified admin-only Şirketler + Yetkiler tabs, CompaniesManagement CRUD + cross-company permission toggles, ManagerVisibilityManagement checkbox matrix, UserManagement 3-role picker + company dropdown + role badges + regression testids. Executed full RBAC E2E across serkan/mgr_test/emp1_test with sequential logins (single-session compliant). Found & fixed one critical regression (isTeamView undefined in TaskCard) that crashed Tasks panel for non-admin users; after fix, RBAC visibility grant works end-to-end.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "TasksPanel.TaskCard", "issue": "FIXED — TaskCard referenced isTeamView from useAuth destructured only in the parent TasksPanel; when a task had assignee_name/company_name a ReferenceError ('isTeamView is not defined') was thrown → 'SERTEX · SİSTEM HATASI' error screen for mgr_test/emp1_test on Tasks tab. Fix: added isTeamView to TaskCard props and pass-through in both TaskCard + ReorderableTaskCard call-sites.", "selector": "task-item-*", "priority": "CRITICAL"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Review the TasksPanel.jsx fix (isTeamView prop drilling) applied by testing agent for correctness — no business logic changed, just prop passing.",
+    "Regression testid `storage-progress-bar` mentioned in review request does not exist anywhere in /app/frontend/src — either remove from acceptance criteria or add the missing testid to the storage progress bar element in UserManagement.jsx / storage summary component.",
+    "`sertex_tab_order_v1` localStorage key is not written until user manually reorders tabs; regression check passed via inspection only (feature still works — user drags tab)."
+  ],
+  "critical_code_review_comments": [
+    "TasksPanel.jsx is 1790 lines and mixes many concerns (TaskCard, SubtaskRow, EditTaskModal, TasksPanel, ContextMenu, Reorder scheduler). Recommend splitting into TaskCard.jsx / SubtaskRow.jsx / EditTaskModal.jsx to prevent regressions like the isTeamView bug (which was caused by only the parent destructuring the hook value while child JSX referenced the identifier).",
+    "CompaniesManagement uses window.confirm() for delete — replace with in-app dialog for a11y + consistency with rest of Sertex UI.",
+    "In CompaniesManagement.jsx setEditing state is keyed by company.name in some testids (`company-edit-input-${c.name}`, `company-save-${c.name}`) but by id in state — when a name is being edited, the testid captures the ORIGINAL name (works for tests, but brittle if names contain special chars)."
+  ],
+  "updated_files": ["/app/frontend/src/components/TasksPanel.jsx"],
+  "success_rate": {"backend": "n/a (backend not tested this iter, CP1 covered in iter 42)", "frontend": "100% after fix (16/16 review-request items verified)"},
+  "test_credentials": "serkan/19071987, mgr_test/mgr12345, emp1_test/emp12345 (verified working)",
+  "seed_data_creation": "Created & deleted 'Alfa Şirketi' during test. Granted manager-visibility mgr_test → emp1_test (LEFT IN PLACE — needed for RBAC E2E and confirmed working). Created two tasks (EMP1_* and MGR_*) that remain in db — safe test data.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "CP2 admin UI + RBAC E2E is GREEN after fixing isTeamView prop drilling in TasksPanel.jsx. All new testids from the review request are present and functional: settings-tab-companies, settings-tab-visibility, companies-management, companies-new-name, companies-create-btn, company-row-*, company-rename-*, company-save-*, company-expand-*, perm-toggle-*-to-*, manager-visibility-management, manager-row-*, manager-expand-*, visibility-toggle-*-*, admin-role-employee/manager/admin, admin-role-badge-*, admin-toggle-role-*, admin-add-company-select. RBAC filtering enforced by backend as expected: employee sees own only; manager sees own + granted employees; admin sees all. Note: the review-request testid `storage-progress-bar` is not implemented in the code.",
+  "rca of the issue": "TaskCard component (line 707 in TasksPanel.jsx) referenced identifier `isTeamView` at line 977 but did not destructure it from its props. Only the outer TasksPanel used `const { isTeamView } = useAuth();`. When mgr_test/emp1_test logged in and Tasks panel rendered any task with assignee_name or company_name populated, React threw ReferenceError and ErrorBoundary rendered 'SERTEX · SİSTEM HATASI' screen. Admin did not hit this because our admin flow did not open Tasks tab, and admin's isTeamView was truthy anyway. Fix: destructure isTeamView on TaskCard props and forward from both TasksPanel → TaskCard and TasksPanel → ReorderableTaskCard → TaskCard call-sites. Reproduction verified before fix (crash) and after fix (clean render + tasks visible)."
+}

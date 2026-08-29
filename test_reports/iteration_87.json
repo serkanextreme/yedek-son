@@ -1,0 +1,42 @@
+{
+  "summary": "E2E test of the new Tekrarlı Hatırlatıcı (recurring reminder) feature across all three surfaces (create form / edit modal / right-click context menu). Backend: 7/7 pytest passed (create+patch+clear+dirty-flag regression via /api/tasks). Frontend: 8/8 scenarios passed via Playwright as ahmet on the preview URL. Feature works end-to-end — create-form specific-time (T1) and relative 'Sonra başla' (T2) persist reminder_at + reminder_interval_min + reminder_repeat_total correctly; regression check (T3) confirms plain create leaves all reminder fields null; edit modal (T4) writes the fields; edit dirty-flag (T5) confirms editing only the title does NOT accidentally arm a reminder; context-menu free-form interval (T6) correctly stores 2 gün → 2880 min with repeat=4 through the ctx-reminder-1h preset; single (non-recurring) context-menu preset (T7) preserves original behavior (no interval, no repeat); the independent 'Yaklaşan Uyarısı' reminder-days select (T8) still works alongside recurring controls. Interval fields conditionally render only when count>1 in both create form and context menu — verified with is_visible() before/after count change.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": { "ui_bugs": [], "integration_issues": [], "design_issues": [] },
+  "features_verified": {
+    "backend_create_recurring_reminder_at": "PASS — POST /api/tasks with reminder_at + reminder_interval_min=15 + reminder_repeat_total=20 persists correctly; GET verify OK.",
+    "backend_create_recurring_reminder_relative": "PASS — reminder_interval_min=30 + reminder_repeat_total=3 persist.",
+    "backend_create_no_reminder_regression": "PASS — plain create returns reminder_at=null, interval=null, repeat=null.",
+    "backend_patch_adds_recurring": "PASS — PATCH populates all four recurring fields.",
+    "backend_patch_title_only_dirty_flag": "PASS — PATCH with only {title} does NOT modify reminder_at/interval/repeat (exclude_unset works).",
+    "backend_patch_explicit_null_clears": "PASS — PATCH with reminder_at:null clears all recurring fields.",
+    "frontend_T1_create_form_specific_time": "PASS — checkbox reveals fields; interval fields show only when count>1; task persists reminder_interval_min=15, reminder_repeat_total=20, reminder_at set.",
+    "frontend_T2_create_form_relative_sonra_basla": "PASS — 'Sonra başla' 2 saat sonra with count=3 + 30 dakika interval → reminder_at ≈ now+2h (0.0 min diff), interval=30, repeat=3.",
+    "frontend_T3_create_no_reminder_regression": "PASS — checkbox off → task created with all reminder fields null.",
+    "frontend_T4_edit_modal_recurring": "PASS — edit-reminder-recurring-enabled + edit-reminder-at-input + edit-reminder-count=5 + 1 saat → interval=60, repeat=5, reminder_at set.",
+    "frontend_T5_edit_dirty_flag_regression": "PASS — editing only edit-title on a no-reminder task does NOT arm reminder (reminder_at stays null).",
+    "frontend_T6_context_menu_free_form_interval": "PASS — ctx-reminder-interval-amount hidden when repeat=1, appears at repeat>1; setting 2 gün + repeat=4 + preset ctx-reminder-1h persisted interval_min=2880, repeat_total=4, reminder_at set.",
+    "frontend_T7_context_menu_single_preset": "PASS — repeat left at 1 (interval fields correctly hidden); ctx-reminder-30m stores reminder_at with interval=null, repeat_total=null.",
+    "frontend_T8_reminder_days_independent": "PASS — task-reminder-days-select in create form still writes reminder_days=3 independently of recurring controls; reminder_at remains null."
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_recurring_reminders.py",
+    "/app/test_reports/pytest/recurring_reminders.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "RecurringReminderFields.jsx conditional interval render (count>1) is clean and consistent across create + edit + ctx menu — good shared component.",
+    "reminderUtils.resolveRecurringReminder correctly sets intervalMin=null when count===1, so single-shot reminders round-trip through the backend as before (Task 7 verified).",
+    "Backend PATCH uses model_dump(exclude_unset=True) which correctly implements the dirty-flag semantics — regression T5 confirmed no leak.",
+    "In the context menu path, the free-form interval (intervalAmount+intervalUnit) is only forwarded when repeatCount>1 (TaskContextMenu.jsx lines 408, 439). Preset fallback intervalMin still applies for repeat=1 — matches spec."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_recurring_reminders.py (new)"
+  ],
+  "success_rate": { "backend": "100% (7/7 pytest)", "frontend": "100% (8/8 E2E scenarios)" },
+  "test_credentials": "ahmet / ahmet123 used (has active trial license — required for task CRUD).",
+  "seed_data_creation": "Test tasks TEST_recur_at_*, TEST_recur_in_*, TEST_no_rem_*, TEST_T4/T5/T6/T7/T8_* created and cleaned up via DELETE after each run. No residual test data.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Recurring reminder feature is stable across all 3 surfaces. Testids to know: RecurringReminderFields uses testPrefix — new-task-reminder-* in create (TasksPanel.jsx), edit-reminder-* in edit modal (EditTaskModal.jsx). Context menu uses ctx-reminder-repeat, ctx-reminder-interval-amount, ctx-reminder-interval-unit. Interval fields render ONLY when count>1. Frontend token stored in localStorage['sertex_token_v1'] (NOT 'token'). Right-clicks in Playwright work reliably via page.locator(sel).click(button='right', force=True) after scroll_into_view_if_needed — bounding_box+mouse.click had misses when tasks were far down the scrollable list.",
+  "rca of the issue": "N/A — no regressions or bugs found. Feature implementation aligns with spec."
+}

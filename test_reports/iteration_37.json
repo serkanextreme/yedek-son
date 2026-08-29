@@ -1,0 +1,44 @@
+{
+  "summary": "iteration_37: NEURAL LINK live stats. Backend endpoint GET /api/stats/summary and Sidebar UI both verified end-to-end for admin (serkan) and regular user (ahmet). All 6 pytest cases PASS. All 11 review acceptance points PASS. No regression on iteration_36 detachable tabs.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "acceptance_criteria_results": {
+    "1_admin_shape_and_is_admin_scope_true": "PASS — keys present, is_admin_scope=true, db_mb=0.44 (float > 0)",
+    "2_user_scope_false_and_smaller_db": "PASS — is_admin_scope=false, db_mb=0.02 (much smaller than admin 0.44)",
+    "3_personal_counts_per_user_even_for_admin": "PASS — admin vs ahmet: files 69 vs 11, conversations 67 vs 37, memories 0 vs 1 (differ)",
+    "4_unauthorized_returns_401": "PASS — GET /api/stats/summary with no bearer → 401",
+    "5_frontend_neural_link_stats_testids": "PASS — [data-testid=neural-link-stats] visible with all 7 nested spans (stat-conversations, stat-tasks, stat-memories, stat-files, stat-notes, stat-email, stat-db-size). Labels + cyan numbers rendered.",
+    "6_gorevler_active_slash_total_format": "PASS — admin shows 'GÖREVLER: 3/4' matching N/M format",
+    "7_admin_shows_sistem_badge": "PASS — 'stat-db-size' contains '(sistem)' amber badge for admin (rendered as (SİSTEM) via hud-text uppercase CSS)",
+    "8_user_no_sistem_badge": "PASS — ahmet's stat-db-size shows '0.02 MB' with no (sistem) span",
+    "9_static_fallback_gone_when_stats_loaded": "PASS — 'Geçmiş · Görevler · Hafıza · Dosyalar · Notlar' fallback replaced by live counters once /api/stats/summary resolves",
+    "10_refresh_on_mount_and_refreshKey": "PASS — useEffect(loadStats, [refreshKey]) fires on mount (both logins showed fresh values). Note: sidebar-internal addNote does not bump refreshKey by design; documented in review as acceptable.",
+    "11_no_regression_detachable_tabs": "PASS — 7 [data-testid^=tab-detach-] buttons present; SIFIRLA/GİZLE/SAĞ buttons visible and unchanged; NEURAL LINK title untouched."
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_stats_summary.py",
+    "/app/test_reports/pytest/iteration_37_stats.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Sidebar.jsx is 965 lines — well over the 700-line guideline. Consider extracting NEURAL-LINK header (with stats renderer) into a separate component such as NeuralLinkHeader.jsx, alongside the existing DraggableTab + renderTabBody extractions suggested in iteration_36.",
+    "Backend stats_summary uses count_documents per collection with per-request $bsonSize aggregation (up to 9 collections for a user) — acceptable at current scale but could add a lightweight Mongo index on user_id for each of these collections if not already present (tasks/notes/files/conversations/messages/memories/email_accounts/reminders/file_chunks) to keep this snappy under load.",
+    "In stats_summary the admin branch uses db.command({collStats: name}) which returns UNCOMPRESSED size; user branch uses $bsonSize $$ROOT which is the raw BSON size. These are two different metrics — admin's 'db_mb' therefore isn't strictly comparable to a user's. Minor semantic caveat; consider documenting or unifying (e.g. both use $bsonSize) to avoid confusion.",
+    "Sidebar addNote (L544-550) refreshes only notes list, not stats — the notes counter in NEURAL LINK header will stay stale until an external refreshKey change (or full reload). Non-blocking per review request, but worth calling loadStats() at the end of addNote for consistency.",
+    "stats.db_mb.toFixed(2) at Sidebar.jsx L800 would throw if db_mb ever came back non-numeric; safe today given backend rounds, but a `Number(stats.db_mb || 0).toFixed(2)` guard would harden it."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_stats_summary.py (new)"
+  ],
+  "success_rate": { "backend": "100% (6/6 pytest)", "frontend": "100% (11/11 acceptance)" },
+  "test_credentials": "serkan / 19071987 (admin), ahmet / ahmet123 (user) — both used successfully.",
+  "seed_data_creation": "One transient task 'TEST_stats_summary_task' created and immediately deleted inside test_task_active_semantics. No other side effects.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "GET /api/stats/summary returns {tasks_active,tasks_total,notes,files,conversations,memories,email_accounts,db_bytes,db_mb,is_admin_scope}. Admin scope uses collStats(size) summed across ALL collections; user scope uses $bsonSize over 9 tracked collections filtered by user_id. Sidebar renders live stats at [data-testid=neural-link-stats] with 7 nested testids: stat-conversations/stat-tasks/stat-memories/stat-files/stat-notes/stat-email/stat-db-size. hud-text CSS uppercases '(sistem)' → '(SİSTEM)'. Fallback text 'Geçmiş · Görevler · Hafıza · Dosyalar · Notlar' only shows while stats is null. useEffect refreshes on refreshKey change (mount-triggered). Sidebar internal addNote does NOT bump refreshKey by design — reviewer flagged this as acceptable.",
+  "rca_of_the_issue": "N/A — new-feature acceptance testing, all criteria met."
+}

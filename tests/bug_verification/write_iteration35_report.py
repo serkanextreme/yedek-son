@@ -1,0 +1,50 @@
+#!/usr/bin/env python3
+import json
+from pathlib import Path
+
+report = {
+  "verdict": "fixed",
+  "user_reported_bug": "bunu verdi tlrntbhghycydyio ama yazıyorum olmuyor — User obtained a Microsoft App Password (tlrntbhghycydyio, 16 chars) for their Hotmail/Outlook personal account and tried to connect it to Sertex Email Panel, but the connection kept failing.",
+  "summary": "No relevant testing skill found. Verified the Hotmail/Outlook App Password failure now returns a clear Microsoft-side limitation message via API and UI, and does not show the old generic IMAP password error for Microsoft personal domains. Regression checks passed for generic non-Microsoft error behavior and Faz 7 backend tests.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/tests/bug_verification/test_hotmail_outlook_app_password_bug.py",
+    "/app/test_reports/hotmail_outlook_api_probe.json",
+    "/app/test_reports/pytest/test_email_faz7_iteration35_serial.txt",
+    "/app/tests/bug_verification/create_ui_email_user.py"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Code review confirms Microsoft personal domain detection is implemented in backend/email_service.py::test_connection and propagated by backend/email_router.py POST /api/email/accounts.",
+    "Code review confirms EmailPanel add-account form renders the red Hotmail/Outlook warning banner with 'HOTMAIL / OUTLOOK KULLANICILARI' and 'Eylül 2024'."
+  ],
+  "updated_files": [
+    "/app/tests/bug_verification/test_hotmail_outlook_app_password_bug.py",
+    "/app/tests/bug_verification/create_ui_email_user.py",
+    "/app/tests/bug_verification/write_iteration35_report.py",
+    "/app/test_reports/hotmail_outlook_api_probe.json",
+    "/app/test_reports/pytest/test_email_faz7_iteration35.txt",
+    "/app/test_reports/pytest/test_email_faz7_iteration35_serial.txt",
+    "/app/test_reports/ui_email_user.json",
+    "/app/test_reports/bug_verification_35.json",
+    "/app/test_reports/iteration_35.json"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "Created one licensed temporary UI test user (TEST_ui_email_ba8750e3) for empty EmailPanel state and deleted it after UI verification. API probe also created temporary licensed users and cleaned them up.",
+  "retest_needed": False,
+  "should_main_agent_self_test": False,
+  "context_for_next_testing_agent": "Skill search returned no relevant testing skill. Focused API probe covered @hotmail.com, @outlook.com, @live.com, @msn.com with 16-char app password and verified 400 Microsoft-specific detail, no old generic message, and no account persistence. Generic non-Microsoft provider still returns the old generic IMAP error. Browser automation logged in as a fresh licensed user, opened Email tab empty state, clicked HESAP EKLE, verified the red banner text, submitted probe-ui@hotmail.com/tlrntbhghycydyio, and saw the Microsoft-specific toast without the old generic error. Faz 7 pytest suite passed serially (11/11). An earlier parallel pytest run was invalidated by the app's single-session rule because another admin login for UI setup kicked the pytest admin token; serial rerun passed.",
+  "rca_of_the_issue": "The original user symptom is explained by Microsoft's Sept 2024 disabling of Basic Authentication/App Password IMAP/SMTP for personal Outlook/Hotmail accounts. Sertex now surfaces this limitation immediately for Microsoft personal domains and recommends Gmail App Password or adding Microsoft OAuth integration. No mocked APIs were used."
+}
+
+for path in [Path('/app/test_reports/bug_verification_35.json'), Path('/app/test_reports/iteration_35.json')]:
+    path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
+print(json.dumps(report, ensure_ascii=False, indent=2))

@@ -1,0 +1,31 @@
+{
+  "summary": "Re-tested SERTEX mobile Task DELETE flow after fix (Alert.alert → custom in-app <Modal> confirm). ALL 5 requested items PASS on the Expo web preview at 390x1200 (serkan/19071987). (1) EDIT → tap 'Görevi Sil' (task-form-delete-button) now renders the in-page confirm dialog with 'Vazgeç' (task-form-delete-cancel) and 'Sil' (task-form-delete-confirm) — both testIDs present in the DOM. (2) Vazgeç dismisses the confirm dialog, no DELETE request fires (0 DELETEs verified via page.on('request')), and the task remains in the list. (3) Sil fires DELETE /api/tasks/{id} (verified: DELETE https://…/api/tasks/570745e2-3634-431a-be7f-64ea293501b1 → 1 request captured), the edit modal closes, and the row disappears from the list. (4) CLEANUP done — the two leftover TESTQA tasks from iteration_106 were removed via this same flow: 'TESTQA98537 Personal EDITED' (id 570745e2…) and 'TESTQA-A6851 AssignedAhmet' (id 725a1af0…). Task counter went from 3/19 → 3/17 confirming 2 tasks removed. Final list contains 0 TESTQA-prefixed tasks. (5) Regression CREATE + toggle both green — POST /api/tasks issued on create, PATCH /api/tasks/{id} on checkbox toggle, then the temp regression task 'TESTQA-REG-CR' was also cleaned up via the new delete flow. No console errors; the pre-existing 'props.pointerEvents is deprecated' warning from Expo Router / RN Web internals is unchanged.",
+  "platforms_tested": ["mobile"],
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "mobile": {
+      "ui_bugs": [],
+      "integration_issues": [],
+      "design_issues": [],
+      "react_native_issues": [
+        {"component": "props.pointerEvents", "issue": "Non-blocking console warning 'props.pointerEvents is deprecated. Use style.pointerEvents' still emits once during login. Origin is RN Web / Expo Router internals — no user-code offender identified. Unchanged from iterations 105–106."}
+      ]
+    }
+  },
+  "parity_issues": [],
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "TaskFormModal.tsx:338-368 — Confirm <Modal transparent animationType=\"fade\"> nested inside the parent Modal works correctly on react-native-web; testIDs task-form-delete-cancel and task-form-delete-confirm are present and interactive. Good cross-platform pattern (also renders as a native modal on iOS/Android). No changes required.",
+    "TaskFormModal.tsx:151-166 — onDelete() → setConfirmingDelete(true); doDelete() closes confirm first (setConfirmingDelete(false)) then awaits api.deleteTask, onSaved, onClose. Order is correct; the underlying edit modal closes only after the DELETE resolves, which prevents a flash of stale UI. Consider handling the failure branch by re-opening the confirm or showing a toast — currently a failed delete leaves the edit modal open with an error string in state.",
+    "Delete button (task-form-delete-button) sits below the fold on the ScrollView; playwright's default click enforces viewport bounds and fails. Testing agents should use dispatched click events or scroll the ScrollView (not window). Not a bug — noted for future e2e."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "not tested (per request)", "frontend": "100% (5/5 requested flows PASS)"},
+  "test_credentials": "serkan / 19071987 (admin) — POST /api/auth/login. Only account used per single-session caveat.",
+  "seed_data_creation": "None persisted. Two iteration_106 leftovers were cleaned. A temporary TESTQA-REG-CR task was created and deleted within the same run. Preview DB is left clean (0 TESTQA tasks remaining).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Task DELETE on Expo web preview is fully working now via the custom in-app confirm modal. Preview DB has 0 TESTQA rows. When automating the delete flow via Playwright on the RN-web preview, DO NOT rely on page.click for the delete button — it sits below the viewport inside the RN ScrollView and Playwright's viewport check fails. Use a dispatched click (el.dispatchEvent(new MouseEvent('click', ...))) or el.scrollIntoView + JS click. All relevant testIDs: task-form-delete-button, task-form-delete-cancel, task-form-delete-confirm, task-form-modal, task-form-cancel-button, task-form-save-button, task-row-<id>, task-toggle-<id>, task-create-fab.",
+  "rca of the issue": "N/A — previously reported RCA (Alert.alert no-op on react-native-web) is FIXED. Verified: tapping task-form-delete-button now toggles setConfirmingDelete(true), which renders a nested <Modal transparent> with real <Pressable> Vazgeç/Sil buttons. Sil's onPress → doDelete() → api.deleteTask() → DELETE /api/tasks/{id}. Confirmed via network interception (DELETE captured) and DOM check (row removed)."
+}

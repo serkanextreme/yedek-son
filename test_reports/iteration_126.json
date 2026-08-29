@@ -1,0 +1,23 @@
+{
+  "summary": "RETEST: HIGH-priority Sidebar Çift Mod hızlı geçiş bug from iteration_125 is FIXED. mgr_test (non-owner manager, personal + dual_mode=true) starts in personal mode with tab-team + tab-orphans HIDDEN. Clicking [data-testid=quick-mode-switch] flips label KİŞİSEL→EKİP and both tabs appear INSTANTLY without page reload. Clicking again flips back to KİŞİSEL and both tabs hide INSTANTLY without reload. Reorder regression PASS — after switching to EKİP the visible tab order is [history, tasks, team, orphans, memory, files, email, notes] i.e. team/orphans in the correct position right after tasks. Owner regression PASS — serkan in personal + dual=true still sees tab-team + tab-orphans (owner immunity intact). Fix approach confirmed working: Sidebar.jsx DEFAULT_ORDER now seeds team/orphans by ROLE (isManagerOrAdmin) instead of by mode, handleReorder merges the visible subset back into full tabOrder preserving hidden slots, and SidebarTabBar.jsx filters via visibleOrder = tabOrder.filter(canSeeTab) at render time (both Reorder.Group values and .map).",
+  "platforms_tested": ["web"],
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "web": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+    "mobile": {"ui_bugs": [], "integration_issues": [], "design_issues": [], "react_native_issues": []}
+  },
+  "parity_issues": [],
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Fix is minimal and localized: DEFAULT_ORDER seeded by role (Sidebar.jsx:101-115), handleReorder preserves hidden tab slots (Sidebar.jsx:138-142), SidebarTabBar.jsx uses visibleOrder = tabOrder.filter(canSeeTab) at line 168 for both Reorder.Group values and map. Clean approach; no reactive useEffect on tabOrder needed."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (not requested)", "frontend": "100%"},
+  "test_credentials": "serkan/19071987 (owner, super_admin); mgr_test/mgr12345 (manager, Test Company A)",
+  "seed_data_creation": "None. Left mgr_test in personal+dual=true (as test ended); serkan in personal+dual=true.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Çift Mod quick-mode-switch works reactively for non-owner managers — both switching directions (personal↔team) update Sidebar tabs instantly without page reload. Reorder preserves correct default position of team/orphans after tasks. Owner immunity remains intact (serkan sees team+orphans in personal mode). Reference: iteration_125 for the previous HIGH bug.",
+  "rca of the issue": "Not applicable — the previously reported bug (iteration_125: tabOrder state stale on canSeeTeam flip) is fixed via role-based DEFAULT_ORDER seed + render-time canSeeTab filter in SidebarTabBar."
+}

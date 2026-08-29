@@ -1,0 +1,48 @@
+{
+  "summary": "Full backend + frontend testing of the new 'Görevler' (Tasks) feature. Backend: 16/16 pytest tests pass — GET/POST/PATCH/DELETE /api/tasks all work, auth guards work (401 without Bearer), invalid status returns 400, patch on unknown id returns 404, past due_date accepted (status stays 'pending'; overdue is a frontend-only visual computation as documented). Frontend: TasksPanel renders as the 2nd of 4 tabs, task CRUD works end-to-end, checkbox toggles to done with strikethrough + emerald styling, right-click AND 3-dot menu both open the context menu with the correct action set for the current status (ctx-paused hidden when already paused, ctx-pending shown, etc.), ctx-paused paints the card yellow with 'BEKLEMEDE' badge, past due_date produces a red 'SÜRESİ GEÇTİ' card, and sort order is overdue → pending → paused → done. One minor testability issue: the stat-box data-testids are built with `label.toLowerCase()` on Turkish upper-case 'İ', which yields Unicode 'i̇' (U+0069 + U+0307 combining dot above). Actual testids in DOM are 'task-stat-akti̇f', 'task-stat-geçti̇', 'task-stat-bekli̇yor', 'task-stat-bi̇tti̇' — the review request assumes plain ASCII 'aktif/geçti/bekliyor/bitti'.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "DELETE /api/tasks/{id}", "issue": "Deleting a non-existent id returns 200 with {deleted:0} rather than 404. Consistent with /api/notes and /api/reminders, so it's a codebase-wide convention rather than a Tasks-specific bug — noting for awareness."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "TasksPanel stat boxes",
+        "issue": "data-testids for the 4 stat boxes are built via `label.toLowerCase()` on Turkish labels ('AKTİF','GEÇTİ','BEKLİYOR','BİTTİ'). Because JS non-locale toLowerCase turns 'İ' into 'i' + combining-dot (U+0307), the actual testids are `task-stat-akti̇f`, `task-stat-geçti̇`, `task-stat-bekli̇yor`, `task-stat-bi̇tti̇` — NOT the clean 'task-stat-aktif' etc. that a reader of the review request would expect. This makes them brittle for e2e tests.",
+        "selector": "[data-testid^='task-stat-']",
+        "priority": "LOW"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_tasks.py",
+    "/app/test_reports/pytest/sertex_tasks.xml"
+  ],
+  "action_items": [
+    "OPTIONAL: In /app/frontend/src/components/TasksPanel.jsx lines ~357-361, replace `data-testid={`task-stat-${s.label.toLowerCase()}`}` with a hard-coded ASCII key on each stat item (e.g. 'pending'/'overdue'/'paused'/'done') so the testids are stable ASCII strings matching the review request. Purely testability; no user-visible impact."
+  ],
+  "critical_code_review_comments": [
+    "server.py update_task builds `update = {k: v for k, v in req.model_dump(exclude_unset=True).items() if v is not None or k == 'due_date'}` — this allows explicitly clearing due_date via null, which is correct, but title/description cannot be cleared to empty string once set (empty string is falsy after Pydantic default? actually '' passes the `v is not None` check, so empty string IS accepted for title/description — that means you could set title='' via PATCH. Consider validating min_length on TaskUpdate.title.",
+    "TasksPanel.jsx isOverdue check is inconsistent with statusStyle: statusStyle uses `task.status === 'done' || task.status === 'paused'` to short-circuit, and isOverdue mirrors that. That's fine, but the initial 'pending' branch in statusStyle only differentiates hover styling — a task whose status is 'pending' and NOT overdue looks identical to a task with an unknown status. Consider explicit branch for unknown status to avoid silent visual bugs.",
+    "TasksPanel.jsx keydown Escape listener inside ContextMenu useEffect is registered but never removed — small memory leak accumulating over each open/close of the menu. Fix: return a cleanup that also removes the keydown handler.",
+    "ContextMenu positioning: `Math.min(x, window.innerWidth - 200)` uses hard-coded 200 for width; the menu min-width is 180 so it works, but if the menu ever grows this could clip. Minor.",
+    "The stat-box testid Turkish-lowercase bug (see ui_bugs) is a general reminder that any i18n text used in identifiers should be locale-independent."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_tasks.py (new file)"
+  ],
+  "success_rate": {
+    "backend": "100% (16/16 pytest cases)",
+    "frontend": "100% for functional flows (add / check / paused / pending / overdue / sort / delete / right-click / 3-dot menu). 1 minor testability nit on stat testids."
+  },
+  "test_credentials": "username=serkan, password=19071987 (confirmed working)",
+  "seed_data_creation": "Test tasks are created and cleaned up within each test. No leftover TEST_ tasks in DB after run.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Tasks feature is fully working end-to-end. If main agent addresses the stat-testid ASCII issue, a quick playwright query for 'task-stat-aktif' presence is enough to re-verify. Existing tasks in DB from user-side seeding (Bineği al / Helltide / Zorluk) are preserved; only TEST_UI prefixed tasks are created/deleted by the test scripts. Regression: /app/backend/tests/test_tasks.py can be re-run with `REACT_APP_BACKEND_URL=<url> pytest tests/test_tasks.py`.",
+  "rca of the issue": "N/A — no failing feature. The stat-testid nit is caused by JavaScript's default toLowerCase() using a Unicode-conformant transformation on 'İ' (LATIN CAPITAL LETTER I WITH DOT ABOVE, U+0130) → 'i' + combining dot above (U+0307). Locale-aware `.toLocaleLowerCase('tr-TR')` would give 'i' — but the cleanest fix is to just hard-code ASCII keys on the stat objects instead of deriving them from the display label."
+}

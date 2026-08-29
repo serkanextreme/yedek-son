@@ -1,0 +1,37 @@
+{
+  "summary": "Faz 8 CP1 (Multi-Tenant RBAC) backend verification: test_permissions.py (20/20) + regression suites test_tasks (22), test_workspace_and_company (16), test_stats_summary (10), test_system_quota (13), test_admin_user_quota (17), test_impersonation (7), test_admin_user_with_license (12) = 117/117 PASS. All acceptance criteria from the review request are met: legacy role='user' → 'employee' migration idempotent (serkan stays admin), companies CRUD with case-insensitive dedup + rename denorm sync + block-on-members delete, manager_visibility with role validation + idempotent upsert + admin-only guards, company_permissions with self-ref rejection + cascade on company delete, task visibility E2E (empA1 own-only, mgrA sees empA1 after visibility, empA2 still blocked, empB1 blocked without cross-company grant, empB1 visible after grant, admin sees all), task PATCH by non-owner returns 404 (no leak), task DELETE returns deleted=0 (silent no-op), and company list scoping for employees.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": { "ui_bugs": [], "integration_issues": [], "design_issues": [] },
+  "acceptance_criteria_results": {
+    "migration_idempotency": "PASS — serkan=admin; ahmet/serhat=employee (post-migration).",
+    "companies_list_admin_and_employee_scoping": "PASS — admin sees all; employee sees only own company.",
+    "companies_create_dedup_and_validation": "PASS — case-insensitive dedup returns same id; name<2 → 400; non-admin → 403.",
+    "companies_patch_denorm_sync": "PASS — rename propagates to users.company_name.",
+    "companies_delete_guard_and_cascade": "PASS — 400 when members present; company_permissions rows purged on delete.",
+    "manager_visibility_crud": "PASS — admin-only; non-manager rejected (400); idempotent upsert (same id); delete 200; missing id 404 (behavior consistent).",
+    "company_permissions_crud": "PASS — admin-only; self-ref 400; idempotent; cascade purge on company delete.",
+    "task_visibility_e2e": "PASS — full Alpha/Beta scenario matches spec (own-only, visibility, cross-company gating).",
+    "task_patch_delete_rbac": "PASS — non-owner PATCH → 404 (no leak); DELETE → 200 deleted=0.",
+    "admin_create_user_role_paths": "PASS — legacy 'user' normalized to 'employee'; 'manager' accepted; 'superuser' → 400; company_id/company_name paths write denorm properly; company_id='' unsets both.",
+    "regression_suite": "PASS — 97/97 across test_tasks(22), test_workspace_and_company(16), test_stats_summary(10), test_system_quota(13), test_admin_user_quota(17), test_impersonation(7), test_admin_user_with_license(12)."
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_permissions.py",
+    "/app/test_reports/pytest/iteration_42_permissions.xml",
+    "/app/test_reports/pytest/iteration_42_regression.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Test run required `-o addopts=''` to disable the pytest-xdist parallel workers configured in /app/backend/pytest.ini. The SESSION_KICKED single-session policy still fundamentally races with parallel logins for the same user (multiple test classes login as admin serkan). Consider (a) per-worker admin session tokens, or (b) removing xdist for suites that share the admin login. Documented already in iteration_41; still applies.",
+    "test_permissions.py hardcodes fallback BASE_URL='http://localhost:8001' (line 16). All other suites use os.environ['REACT_APP_BACKEND_URL'] strictly (KeyError). Keep consistency — either all fall back or none. Recommendation: mirror the strict pattern in test_permissions.py to catch env drift early.",
+    "Cascade delete on company also implicitly assumes viewer_company_id references are cleaned. The test only asserts target_company_id side. Consider adding a symmetric assertion (viewer side purge) if the code path supports both directions."
+  ],
+  "updated_files": [],
+  "success_rate": { "backend": "100% (117/117 pytest)", "frontend": "not tested (backend-only request)" },
+  "test_credentials": "serkan / 19071987 (admin), ahmet / ahmet123 (employee, active trial license)",
+  "seed_data_creation": "All test-created companies/users/visibility/permissions rows are cleaned up per-test; test_zzz_cleanup_final_state confirms no residue with the tracked prefixes.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Faz 8 CP1 backend is fully green. New endpoints: /api/companies (GET/POST/PATCH/DELETE), /api/manager-visibility (GET/POST/DELETE), /api/company-permissions (GET/POST/DELETE) — all admin-guarded except GET /api/companies which is scoped for non-admins to their own company. Task visibility now flows through permissions.visible_user_ids() (server.py L1103) and can_view_user() (L1160). Frontend (CP2) still expects legacy role='user' in some places — will need updates for role='employee'/'manager' UI. When running full suite, either use `-o addopts=''` or accept that pytest-xdist collides with SESSION_KICKED.",
+  "rca_of_the_issue": "N/A — feature acceptance run; 117/117 green."
+}

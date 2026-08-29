@@ -1,0 +1,30 @@
+{
+  "summary": "Team Faz 2 (Overdue Cron + Heat Map) fully verified. Backend: 52/52 pytest PASS (test_permissions 20 + test_tasks 22 + test_team_faz2 10). Frontend: bell + badge + popover + heatmap all working across mgr_test / emp1_test / ahmet. No regressions.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_team_faz2.py",
+    "/app/test_reports/pytest/iteration_46_team_faz2.xml",
+    "/app/test_reports/pytest/iteration_46_regression.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Backend scan-now endpoint reports {tasks_seen, self, manager} aggregate counts — good for smoke debugging. Consider also returning per-task_id delta so front-end tests can pin idempotency to a specific task without inspecting the full notifications list.",
+    "notifications dedup relies on unique index over (user_id, task_id, type) with a partial filter on task_id str; works but be aware that deleting a task does NOT cascade-delete existing notification rows (documented in agent_to_agent_context_note). If overdue task is later completed/deleted, stale 'overdue' notifications remain in user history. Not blocking; suggest a cascade on task delete or a mark_task_resolved sweep in the scanner tick."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (52/52 = 20 permissions + 22 tasks + 10 team_faz2)",
+    "frontend": "100% (bell visible for all authenticated users; mgr badge = 12; popover 'BİLDİRİMLER (23)' with correct manager-fanout copy 'emp1_test kullanıcısının görevi geciktirmesi'; single-read badge 12→11; mark-all → badge gone; popover close via notification-close OK; team-heatmap-emp1_test grid 30/60/90 cells respectively; cell title 'YYYY-MM-DD · N tamamlandı'; employees/ahmet see bell but no tab-team)"
+  },
+  "test_credentials": "serkan/19071987, mgr_test/mgr12345, emp1_test/emp12345, ahmet/ahmet123",
+  "seed_data_creation": "Created 2 overdue tasks (UI_Overdue_Faz2 / UI_Overdue_Faz2b) as emp1_test then triggered POST /api/notifications/scan-now; deleted the tasks in teardown. Notification rows tolerated per playbook.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Team Faz 2 is fully green. Backend scanner runs every 5min in-process (server.py startup start_team_scanner); ad-hoc admin trigger is POST /api/notifications/scan-now → {tasks_seen, self, manager}. Heatmap endpoint: GET /api/team/heatmap?days=N. Notification unique index on (user_id, task_id, type) enforces dedup — do NOT try to bypass by rescanning. If future work introduces additional notification types, extend team_service._insert_notif and the popover copy. Overdue reminder modal (SÜRESİ GEÇMİŞ GÖREV, dismissed via 'Tümünü kapat') is a separate legacy pre-Faz2 UX and coexists with the new NotificationBell — keep both.",
+  "rca of the issue": "N/A — no issues found."
+}
