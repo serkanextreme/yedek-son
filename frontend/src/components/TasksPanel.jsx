@@ -64,6 +64,8 @@ import { printTasks, exportTasksExcel, exportTasksWord } from "../lib/taskExport
 import ExportSelectModal from "./ExportSelectModal";
 import { CopyTaskModal } from "./tasks/CopyTaskModal";
 import { TaskPasteMenu } from "./tasks/TaskPasteMenu";
+import { TemplateBar } from "./tasks/TemplateBar";
+import { TemplatesModal } from "./tasks/TemplatesModal";
 import { useTaskClipboard, clearTaskClipboard } from "../lib/taskClipboard";
 
 // Faz 9 CP6 — TasksPanel bileşenleri ayrı dosyalara taşındı (davranış birebir aynı).
@@ -293,6 +295,9 @@ const TasksPanel = ({ refreshSignal, onDataChanged, detached = false, initialCat
   const [copyModalTask, setCopyModalTask] = useState(null);
   const [pasteMenu, setPasteMenu] = useState(null); // { x, y, categoryId, categoryName }
   const clipboard = useTaskClipboard();
+  // Görev Şablonları (Şablon Kütüphanesi).
+  const [templatesOpen, setTemplatesOpen] = useState(false);
+  const [templatesRefresh, setTemplatesRefresh] = useState(0);
   const orderedCategories = useMemo(() => {
     if (!catOrder.length) return categories;
     const pos = new Map(catOrder.map((id, i) => [id, i]));
@@ -1122,6 +1127,13 @@ const TasksPanel = ({ refreshSignal, onDataChanged, detached = false, initialCat
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Yapıştırılamadı");
     }
+  };
+
+  // Şablondan görev oluştur (instantiate) → oluşan görevi Düzenle'de aç.
+  const handleUseTemplate = (task) => {
+    load();
+    onDataChanged?.();
+    if (task) setEditing(task);
   };
 
   // Faz 8 CP5 — task-level due-soon overrides via context menu.
@@ -2167,6 +2179,15 @@ const TasksPanel = ({ refreshSignal, onDataChanged, detached = false, initialCat
         </div>
       )}
 
+      {/* Şablondan Başla çubuğu + Şablon Kütüphanesi girişi */}
+      {!showArchived && (
+        <TemplateBar
+          refreshKey={templatesRefresh}
+          onUse={handleUseTemplate}
+          onManage={() => setTemplatesOpen(true)}
+        />
+      )}
+
       {/* Görev Kopyalama panosu — dolu iken göster (iş koluna sağ tık → Yapıştır) */}
       {clipboard?.sourceId && !showArchived && (
         <div
@@ -2810,6 +2831,14 @@ const TasksPanel = ({ refreshSignal, onDataChanged, detached = false, initialCat
           onPaste={() => handlePaste(pasteMenu.categoryId, pasteMenu.categoryName)}
           onClear={() => clearTaskClipboard()}
           onClose={() => setPasteMenu(null)}
+        />
+      )}
+      {templatesOpen && (
+        <TemplatesModal
+          categories={categories}
+          currentUser={user}
+          onUse={handleUseTemplate}
+          onClose={() => { setTemplatesOpen(false); setTemplatesRefresh((x) => x + 1); }}
         />
       )}
       {/* GÖREV BAĞLAMA — görevleri bağla / grubu düzenle modalı */}

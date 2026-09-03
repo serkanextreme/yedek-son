@@ -555,5 +555,52 @@ export const taskAttachmentsApi = {
   },
 };
 
+// Görev Şablonları (Task Templates) — sık görevleri şablonla, hızlı oluştur.
+export const templatesApi = {
+  list: () => api.get("/task-templates").then((r) => r.data),
+  get: (id) => api.get(`/task-templates/${id}`).then((r) => r.data),
+  create: (body) => api.post("/task-templates", body).then((r) => r.data),
+  update: (id, patch) => api.patch(`/task-templates/${id}`, patch).then((r) => r.data),
+  remove: (id) => api.delete(`/task-templates/${id}`).then((r) => r.data),
+  // Şablondan başlat — gerçek görev oluşturur (bana atanır), Task döner.
+  instantiate: (id, { category_id = null } = {}) =>
+    api.post(`/task-templates/${id}/instantiate`, { category_id }).then((r) => r.data),
+};
+
+// Şablon dosya ekleri — taskAttachmentsApi ile AYNI şekil (TaskAttachments
+// bileşeni `attachmentApi` prop'u ile bunu kullanır).
+export const templateAttachmentsApi = {
+  list: (id) => api.get(`/task-templates/${id}/attachments`).then((r) => r.data),
+  remove: (id, attId) =>
+    api.delete(`/task-templates/${id}/attachments/${attId}`).then((r) => r.data),
+  download: (id, attId) =>
+    api.get(`/task-templates/${id}/attachments/${attId}/download`, { responseType: "blob" }),
+  upload: async (id, file, onProgress) => {
+    const initRes = await api.post(`/task-templates/${id}/attachments/init`, {
+      filename: file.name,
+      content_type: file.type || "application/octet-stream",
+      total_size: file.size,
+    });
+    const uploadId = initRes.data.upload_id;
+    const total = file.size || 0;
+    let sent = 0;
+    let index = 0;
+    for (let start = 0; start < total; start += ATTACH_CHUNK_SIZE) {
+      const blob = file.slice(start, Math.min(start + ATTACH_CHUNK_SIZE, total));
+      const fd = new FormData();
+      fd.append("upload_id", uploadId);
+      fd.append("index", String(index));
+      fd.append("chunk", blob, file.name);
+      await api.post(`/task-templates/${id}/attachments/chunk`, fd);
+      sent += blob.size;
+      index += 1;
+      if (onProgress) onProgress(Math.min(99, Math.round((sent / total) * 100)));
+    }
+    const done = await api.post(`/task-templates/${id}/attachments/complete`, { upload_id: uploadId });
+    if (onProgress) onProgress(100);
+    return done.data;
+  },
+};
+
 
 

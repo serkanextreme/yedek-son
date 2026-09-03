@@ -309,6 +309,9 @@ from permissions_router import build_permissions_router
 app.include_router(build_permissions_router(db, current_user), prefix="/api")
 # Faz 9 refactor — tasks + categories + orphans live in their own module.
 app.include_router(build_tasks_router(db, licensed_user, current_user), prefix="/api")
+# Görev Şablonları (Task Templates) — sık kullanılan görevleri şablonla, hızlı oluştur.
+from routers.templates_router import build_templates_router
+app.include_router(build_templates_router(db, licensed_user), prefix="/api")
 # Faz 9 refactor — team + notifications + weather.
 from routers.team_router import build_team_router
 app.include_router(build_team_router(db, licensed_user, current_user, require_admin), prefix="/api")

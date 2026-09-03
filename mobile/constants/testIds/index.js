@@ -18,3 +18,4 @@ export * from './detail';
 export * from './settings';
 export * from './announce';
 export * from './archive';
+export * from './templates';

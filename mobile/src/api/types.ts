@@ -42,6 +42,25 @@ export type Subtask = {
   status?: string | null;
 };
 
+// Görev Şablonu (Task Template) — mirrors backend TaskTemplate.
+export type TaskTemplate = {
+  id: string;
+  name: string;
+  title: string;
+  description: string;
+  category_id?: string | null;
+  reminder_days?: number | null;
+  reminder_disabled?: boolean;
+  subtasks: { id?: string; text: string }[];
+  scope: "personal" | "shared";
+  company_id?: string | null;
+  owner_id?: string;
+  created_by?: string;
+  created_by_name?: string | null;
+  created_at?: string;
+  updated_at?: string;
+};
+
 export type Task = {
   id: string;
   title: string;

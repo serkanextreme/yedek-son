@@ -68,6 +68,8 @@ import { OtpDisplayModal } from "./tasks/OtpDisplayModal";
 import { LinkTasksModal } from "./tasks/LinkTasksModal";
 import { CopyTaskModal } from "./tasks/CopyTaskModal";
 import { TaskPasteMenu } from "./tasks/TaskPasteMenu";
+import { TemplateBar } from "./tasks/TemplateBar";
+import { TemplatesModal } from "./tasks/TemplatesModal";
 import { useTaskClipboard, clearTaskClipboard } from "../lib/taskClipboard";
 import { printTasks, exportTasksExcel, exportTasksWord } from "../lib/taskExport";
 
@@ -684,6 +686,9 @@ const KolayInterface = ({ onOpenSettings, sidebarOpen, isMobile }) => {
   const [copyModalTask, setCopyModalTask] = useState(null);
   const [pasteMenu, setPasteMenu] = useState(null); // { x, y, categoryId, categoryName }
   const clipboard = useTaskClipboard();
+  // Görev Şablonları.
+  const [templatesOpen, setTemplatesOpen] = useState(false);
+  const [templatesRefresh, setTemplatesRefresh] = useState(0);
   const [sharing, setSharing] = useState(null);
   const [reassigning, setReassigning] = useState(null);
   const [lockConfig, setLockConfig] = useState(null);
@@ -807,6 +812,11 @@ const KolayInterface = ({ onOpenSettings, sidebarOpen, isMobile }) => {
       });
       toast.success(`Yapıştırıldı → ${categoryName || "Kolsuz"}`); load();
     } catch (e) { toast.error(e?.response?.data?.detail || "Yapıştırılamadı"); }
+  };
+  // Şablondan görev oluştur → Düzenle'de aç.
+  const handleUseTemplate = (task) => {
+    load();
+    if (task) setEditing(task);
   };
   const setTaskReminderDays = async (id, days) => {
     try { await tasksApi.update(id, { reminder_days: days == null ? 0 : days, reminder_disabled: false }); toast.success(days == null ? "Uyarı: varsayılan" : `Uyarı: ${days} gün önce`); load(); }
@@ -1094,6 +1104,13 @@ const KolayInterface = ({ onOpenSettings, sidebarOpen, isMobile }) => {
                 </button>
               </div>
 
+              <TemplateBar
+                refreshKey={templatesRefresh}
+                onUse={handleUseTemplate}
+                onManage={() => setTemplatesOpen(true)}
+              />
+              <div className="mb-3" />
+
               {clipboard?.sourceId && (
                 <div
                   data-testid="kolay-task-clipboard-bar"
@@ -1251,6 +1268,14 @@ const KolayInterface = ({ onOpenSettings, sidebarOpen, isMobile }) => {
           onPaste={() => handlePaste(pasteMenu.categoryId, pasteMenu.categoryName)}
           onClear={() => clearTaskClipboard()}
           onClose={() => setPasteMenu(null)}
+        />
+      )}
+      {templatesOpen && (
+        <TemplatesModal
+          categories={cats}
+          currentUser={user}
+          onUse={handleUseTemplate}
+          onClose={() => { setTemplatesOpen(false); setTemplatesRefresh((x) => x + 1); }}
         />
       )}
       {sharing && (

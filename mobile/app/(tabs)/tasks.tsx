@@ -19,6 +19,7 @@ import { Category, CompanyLite, Task, TaskGroup } from "@/src/api/types";
 import { useAuth } from "@/src/auth/AuthContext";
 import { isAdminLike } from "@/src/auth/roles";
 import { CategorySection } from "@/src/components/CategorySection";
+import { TemplateBar } from "@/src/components/TemplateBar";
 import { HudHeader } from "@/src/components/HudHeader";
 import { LinkTasksModal } from "@/src/components/LinkTasksModal";
 import { GroupBadge } from "@/src/components/TaskRow";
@@ -315,9 +316,18 @@ export default function TasksScreen() {
             >
               <Ionicons name="folder-outline" size={20} color={colors.primary} />
             </Pressable>
+            <Pressable
+              onPress={() => router.push("/templates")}
+              hitSlop={10}
+              style={({ pressed }) => [styles.headerBtn, pressed && styles.pressed]}
+            >
+              <Ionicons name="albums-outline" size={20} color={colors.primary} />
+            </Pressable>
           </View>
         }
       />
+
+      <TemplateBar onAuthError={() => { logout(); router.replace("/login"); }} />
 
       {clipboard?.sourceId && (
         <View style={styles.clipboardBar} testID={TASKS.clipboardBar}>

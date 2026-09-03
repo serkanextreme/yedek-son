@@ -25,6 +25,7 @@ import {
   api,
   ApiError,
   attachmentDownloadUrl,
+  templateAttachmentDownloadUrl,
   authHeader,
   uploadAttachment,
 } from "@/src/api/client";
@@ -35,6 +36,8 @@ import { DETAIL } from "@/constants/testIds";
 type Props = {
   taskId: string;
   onAuthError: () => void;
+  // "template" → şablon ekleri (aynı UI, farklı uç noktalar).
+  kind?: "task" | "template";
 };
 
 type PickedFile = { uri: string; name: string; type: string; size?: number };
@@ -65,8 +68,11 @@ function fileIcon(ct?: string | null): keyof typeof Ionicons.glyphMap {
   return "document-attach-outline";
 }
 
-export const AttachmentsSection = ({ taskId, onAuthError }: Props) => {
+export const AttachmentsSection = ({ taskId, onAuthError, kind = "task" }: Props) => {
   const insets = useSafeAreaInsets();
+  const isTpl = kind === "template";
+  const dlUrl = (attId: string) =>
+    isTpl ? templateAttachmentDownloadUrl(taskId, attId) : attachmentDownloadUrl(taskId, attId);
   const [items, setItems] = useState<TaskAttachment[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -81,14 +87,16 @@ export const AttachmentsSection = ({ taskId, onAuthError }: Props) => {
 
   const load = useCallback(async () => {
     try {
-      const rows = await api.listAttachments(taskId);
+      const rows = isTpl
+        ? await api.listTemplateAttachments(taskId)
+        : await api.listAttachments(taskId);
       setItems(rows);
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) return onAuthError();
     } finally {
       setLoading(false);
     }
-  }, [taskId, onAuthError]);
+  }, [taskId, onAuthError, isTpl]);
 
   useEffect(() => {
     load();
@@ -100,7 +108,7 @@ export const AttachmentsSection = ({ taskId, onAuthError }: Props) => {
       setUploading(true);
       setError(null);
       try {
-        await uploadAttachment(taskId, file);
+        await uploadAttachment(taskId, file, kind);
         await load();
       } catch (e) {
         if (e instanceof ApiError && e.status === 401) return onAuthError();
@@ -110,7 +118,7 @@ export const AttachmentsSection = ({ taskId, onAuthError }: Props) => {
         setUploading(false);
       }
     },
-    [taskId, load, onAuthError],
+    [taskId, load, onAuthError, kind],
   );
 
   const ensureCamera = async (): Promise<boolean> => {
@@ -189,7 +197,7 @@ export const AttachmentsSection = ({ taskId, onAuthError }: Props) => {
     setDeleteTarget(null);
     setError(null);
     try {
-      await api.deleteAttachment(taskId, target.id);
+      await (isTpl ? api.deleteTemplateAttachment(taskId, target.id) : api.deleteAttachment(taskId, target.id));
       await load();
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) return onAuthError();
@@ -205,7 +213,7 @@ export const AttachmentsSection = ({ taskId, onAuthError }: Props) => {
     setError(null);
     setOpening(att.id);
     try {
-      const url = attachmentDownloadUrl(taskId, att.id);
+      const url = dlUrl(att.id);
       const safe = (att.original_filename || "dosya").replace(/[^\w.\-]+/g, "_");
       const dest = `${FileSystem.cacheDirectory}${Date.now()}_${safe}`;
       const dl = await FileSystem.downloadAsync(url, dest, { headers });
@@ -279,7 +287,7 @@ export const AttachmentsSection = ({ taskId, onAuthError }: Props) => {
             <Pressable style={styles.itemBody} onPress={() => openItem(att)}>
               {isImage(att.content_type) ? (
                 <Image
-                  source={{ uri: attachmentDownloadUrl(taskId, att.id), headers }}
+                  source={{ uri: dlUrl(att.id), headers }}
                   style={styles.thumb}
                   contentFit="cover"
                   transition={150}
@@ -350,7 +358,7 @@ export const AttachmentsSection = ({ taskId, onAuthError }: Props) => {
           </Pressable>
           {preview && (
             <Image
-              source={{ uri: attachmentDownloadUrl(taskId, preview.id), headers }}
+              source={{ uri: dlUrl(preview.id), headers }}
               style={styles.previewImage}
               contentFit="contain"
               transition={150}

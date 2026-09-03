@@ -13,7 +13,7 @@ const fmtSize = (b) => {
 
 // Görev kartına / Düzenle penceresine gömülen "📎 Dosyalar" bölümü.
 // Yükle (parçalı) + listele + tıkla-indir + sil. Kendi verisini yükler.
-export const TaskAttachments = ({ taskId, currentUserId, canManage = false, compact = false }) => {
+export const TaskAttachments = ({ taskId, currentUserId, canManage = false, compact = false, attachmentApi = taskAttachmentsApi }) => {
   const [items, setItems] = useState(null); // null=loading
   const [uploading, setUploading] = useState(null); // {name, pct}
   const [downloadingId, setDownloadingId] = useState(null);
@@ -21,7 +21,7 @@ export const TaskAttachments = ({ taskId, currentUserId, canManage = false, comp
   const inputRef = useRef(null);
 
   const load = useCallback(() => {
-    taskAttachmentsApi.list(taskId)
+    attachmentApi.list(taskId)
       .then((r) => setItems(r || []))
       .catch(() => setItems([]));
   }, [taskId]);
@@ -38,7 +38,7 @@ export const TaskAttachments = ({ taskId, currentUserId, canManage = false, comp
       }
       setUploading({ name: f.name, pct: 0 });
       try {
-        await taskAttachmentsApi.upload(taskId, f, (pct) =>
+        await attachmentApi.upload(taskId, f, (pct) =>
           setUploading({ name: f.name, pct }),
         );
         toast.success(`Dosya eklendi: ${f.name}`);
@@ -54,7 +54,7 @@ export const TaskAttachments = ({ taskId, currentUserId, canManage = false, comp
   const handleDownload = async (att) => {
     setDownloadingId(att.id);
     try {
-      const res = await taskAttachmentsApi.download(taskId, att.id);
+      const res = await attachmentApi.download(taskId, att.id);
       const url = URL.createObjectURL(res.data);
       const a = document.createElement("a");
       a.href = url;
@@ -83,7 +83,7 @@ export const TaskAttachments = ({ taskId, currentUserId, canManage = false, comp
     if (!kind) return handleDownload(att); // önizlenemeyen tür → indir
     setDownloadingId(att.id);
     try {
-      const res = await taskAttachmentsApi.download(taskId, att.id);
+      const res = await attachmentApi.download(taskId, att.id);
       const url = URL.createObjectURL(res.data);
       setPreview({ att, url, kind });
     } catch (e) {
@@ -102,7 +102,7 @@ export const TaskAttachments = ({ taskId, currentUserId, canManage = false, comp
 
   const handleDelete = async (att) => {
     try {
-      await taskAttachmentsApi.remove(taskId, att.id);
+      await attachmentApi.remove(taskId, att.id);
       setItems((prev) => (prev || []).filter((x) => x.id !== att.id));
       toast.success("Dosya silindi");
     } catch (e) {

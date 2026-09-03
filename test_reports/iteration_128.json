@@ -1,0 +1,50 @@
+{
+  "summary": "Sertex — Görev Şablonları (Task Templates) e2e verification on web + mobile + backend. Backend pytest 7/7 PASS. Web UI (TemplateBar + TemplatesModal + TemplateFormModal): full CRUD + 'Kullan' (instantiate) works — creates real task, opens task edit modal, cross-platform parity confirmed (web-created template visible on mobile). Mobile UI (/templates screen): CRUD works, form fields OK, save OK, but the 'Kullan' (instantiate) button did NOT create a task via Expo web preview — API works when hit directly (confirmed via curl → 200 with new task). Console shows only dev-only hydration warning on web (dev instrumentation) and RN deprecation warnings on mobile.",
+  "platforms_tested": ["web", "mobile"],
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "web": {
+      "ui_bugs": [],
+      "integration_issues": [],
+      "design_issues": [
+        {"screen": "TemplateFormModal <select>", "issues": ["Dev-only hydration warning: '<span> cannot be a child of <option>' — traced to Emergent visual-editor x-source instrumentation wrapping the mapped <option> children in a <span>. Not a runtime bug but produces console noise in dev; harmless in production build."]}
+      ]
+    },
+    "mobile": {
+      "ui_bugs": [
+        {"component": "TemplatesScreen row 'Kullan' (Pressable, testID=template-use-<id>)", "issue": "Clicking the 'Kullan' Pressable in Expo Web preview did NOT trigger instantiate — no task was created (verified via API list). The neighbouring Edit form modal ended up open instead. Direct call to POST /api/task-templates/{id}/instantiate returned 200 with a proper task, so backend + client API method are fine — the failure is in the Pressable/onPress on Expo Web (possibly icon child stealing the tap, or missing hitSlop/z-order vs neighbouring edit icon Pressable). Reference: /app/mobile/app/templates.tsx:148-153.", "testID": "template-use-<id>", "priority": "HIGH"}
+      ],
+      "integration_issues": [
+        {"flow": "Şablondan görev oluştur (mobile UI)", "issue": "UI tap on 'Kullan' does not reach handleUse → api.instantiateTemplate never called; user sees no task and no navigation to /task/[id].", "affected_testIDs": ["template-use-<id>"]}
+      ],
+      "design_issues": [],
+      "react_native_issues": [
+        {"component": "React Native Web shadow* style props", "issue": "Console warning: '\"shadow*\" style props are deprecated. Use \"boxShadow\".' — needs migration from shadowColor/shadowOffset/shadowOpacity/shadowRadius to a single boxShadow style. Reference: repeated at load time on tasks + templates screens."},
+        {"component": "React Native Web props.pointerEvents", "issue": "Console warning: 'props.pointerEvents is deprecated. Use style.pointerEvents' — move any pointerEvents={...} prop into the style object."}
+      ]
+    }
+  },
+  "parity_issues": [
+    {"flow": "Instantiate template → real task", "platform": "mobile", "issue": "Web UI creates task and opens edit modal; Mobile UI tap on 'Kullan' fails silently (no task created, no navigation).", "expected": "Both surfaces create the task and open the task detail/edit view", "actual": "Only web works end-to-end; mobile requires API-level invocation."},
+    {"flow": "Cross-surface visibility of shared data", "platform": "both", "issue": "Templates and instantiated tasks created on one surface are visible on the other (shared backend, /api/task-templates + /api/tasks).", "expected": "Same list on both surfaces", "actual": "Confirmed — web-created 'Test WEB TPL …' template and its instantiated task showed up on mobile."}
+  ],
+  "test_report_links": ["/app/backend/tests/test_task_templates.py", "/app/test_reports/pytest/iter128_templates.xml", "/app/test_reports/iter128_web_1_tasks.jpeg", "/app/test_reports/iter128_web_2_list.jpeg", "/app/test_reports/iter128_web_3_after_instantiate.jpeg", "/app/test_reports/iter128_mob_2_templates.jpeg", "/app/test_reports/iter128_mob_v2_saved.jpeg", "/app/test_reports/iter128_mob_v2_task.jpeg"],
+  "action_items": [
+    "Fix mobile Kullan (template-use-<id>) tap on Expo Web preview so it fires handleUse → api.instantiateTemplate → router.push('/task/{id}'). Likely candidates: (a) add hitSlop and ensure the useBtn Pressable's onPress isn't shadowed by the neighbouring edit-icon Pressable when they lay out on the same row on narrow widths; (b) verify child <Ionicons/Text> aren't intercepting the press via any accessibilityRole/href on web. Test with Playwright targeting exact [data-testid='template-use-<id>'] click.",
+    "Migrate React Native Web deprecation warnings: 'shadow*' → 'boxShadow', 'props.pointerEvents' → 'style.pointerEvents'. Sweep /app/mobile/src and /app/mobile/app.",
+    "(Nice-to-have) Silence dev-only hydration warning '<span> in <option>' by asking the visual-editor instrumentation to skip <option> children — no user impact, dev console noise only."
+  ],
+  "critical_code_review_comments": [
+    "templates_router.py is well-structured and honours the scope=personal/shared visibility with a proper $or query. `_can_view_template` uses get_user_company_ids() first — good multi-company support.",
+    "In-memory `_tpl_upload_sessions` dict for chunked uploads is not clustered — fine for single-worker deployments but will break with multi-replica scale-out. Not blocking for current preview.",
+    "instantiate_template best-effort attachment copy: swallows all exceptions (log-only). If storage fails, user gets a task without attachments and no signal. Consider returning a partial-warning field or logging metric.",
+    "TemplateFormModal (web) auto-open subtasks section: OK; attachments block only appears after first save — good UX for chunked upload (needs template id)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (7/7 pytest)", "frontend": "web 100%, mobile ~85% (Kullan tap regression)"},
+  "seed_data_creation": "None retained — all test templates and tasks were permanently deleted via API at teardown (verified: 'Remaining test templates: 0').",
+  "test_credentials": "serkan / 19071987 (super_admin + owner). Single-session — ran web and mobile SEQUENTIALLY, not in parallel.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend pytest is stable and idempotent. On mobile, the Kullan (template-use-<id>) Pressable did not trigger the instantiate handler on Expo Web preview — API level was proven via curl. When the main agent fixes the mobile Pressable, re-run the mobile flow at https://functional-themes.expo.preview.emergentagent.com/templates and expect URL to change to /task/<newid> after tapping Kullan. Web flow is fully green — no regression risk from the fix. Use unique names like 'Test MOB TPL <ts>' and CLEAN UP via /api/task-templates/{id} DELETE + /api/tasks/{id}/permanent."
+}
