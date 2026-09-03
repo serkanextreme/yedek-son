@@ -112,6 +112,9 @@ export const tasksApi = {
       ...(extras.reminder_repeat_total != null ? { reminder_repeat_total: extras.reminder_repeat_total } : {}),
       ...(extras.reminder_repeat_left != null ? { reminder_repeat_left: extras.reminder_repeat_left } : {}),
     }).then((r) => r.data),
+  // Görev Kopyalama (Kopyala → Yapıştır) — kaynağı çoğaltır, kopya bana atanır.
+  duplicate: (id, { include_subtasks = true, include_attachments = true, category_id = null } = {}) =>
+    api.post(`/tasks/${id}/duplicate`, { include_subtasks, include_attachments, category_id }).then((r) => r.data),
   update: (id, patch) => api.patch(`/tasks/${id}`, patch).then((r) => r.data),
   setStatus: (id, status) =>
     api.patch(`/tasks/${id}`, { status }).then((r) => r.data),

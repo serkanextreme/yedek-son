@@ -20,6 +20,9 @@ type Props = {
   busyId: string | null;
   highlight?: string;
   groupBadges?: Record<string, GroupBadge>;
+  // Görev Kopyalama — pano dolu iken başlıkta "Yapıştır" düğmesi göster.
+  pasteVisible?: boolean;
+  onPaste?: (categoryId: string | null, categoryName: string) => void;
 };
 
 export const CategorySection = ({
@@ -32,10 +35,13 @@ export const CategorySection = ({
   busyId,
   highlight,
   groupBadges,
+  pasteVisible,
+  onPaste,
 }: Props) => {
   const isOpen = expanded[node.category.id] !== false; // default open
   const { rollup, category } = node;
   const color = category.color || colors.primary;
+  const pasteCatId = category.id === "__uncat__" ? null : category.id;
 
   return (
     <View style={[styles.wrap, depth > 0 && { marginLeft: spacing.md }]}>
@@ -53,6 +59,17 @@ export const CategorySection = ({
         <Text style={styles.name} numberOfLines={1}>
           {category.name}
         </Text>
+        {pasteVisible && onPaste && (
+          <Pressable
+            testID={`${TASKS.categoryPaste}-${category.id}`}
+            onPress={() => onPaste(pasteCatId, category.name)}
+            hitSlop={8}
+            style={({ pressed }) => [styles.pasteBtn, pressed && styles.pressed]}
+          >
+            <Ionicons name="clipboard-outline" size={13} color={colors.primary} />
+            <Text style={styles.pasteText}>Yapıştır</Text>
+          </Pressable>
+        )}
         <View style={styles.count}>
           <Text style={styles.countText}>
             {rollup.done}/{rollup.total}
@@ -85,6 +102,8 @@ export const CategorySection = ({
               busyId={busyId}
               highlight={highlight}
               groupBadges={groupBadges}
+              pasteVisible={pasteVisible}
+              onPaste={onPaste}
             />
           ))}
           {node.tasks.length === 0 && node.children.length === 0 && (
@@ -112,6 +131,18 @@ const styles = StyleSheet.create({
   pressed: { opacity: 0.7 },
   colorDot: { width: 8, height: 8, borderRadius: 4 },
   name: { flex: 1, color: colors.textPrimary, fontSize: 14, fontWeight: "700", letterSpacing: 0.5 },
+  pasteBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    borderRadius: radius.pill,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    backgroundColor: colors.primary + "22",
+  },
+  pasteText: { color: colors.primary, fontSize: 11, fontFamily: monoFont, fontWeight: "700" },
   count: {
     borderWidth: 1,
     borderColor: colors.borderStrong,

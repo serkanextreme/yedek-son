@@ -24,6 +24,7 @@ import { LinkTasksModal } from "@/src/components/LinkTasksModal";
 import { GroupBadge } from "@/src/components/TaskRow";
 import { TaskFormModal } from "@/src/components/TaskFormModal";
 import { allCategoryIds, buildTaskTree, CatNode, pruneEmpty } from "@/src/lib/taskTree";
+import { useTaskClipboard, clearTaskClipboard } from "@/src/lib/taskClipboard";
 import { colors, monoFont, radius, spacing } from "@/src/theme/colors";
 import { storage } from "@/src/utils/storage";
 import { ARCHIVE, CATMGR, TASK_FORM, TASKS } from "@/constants/testIds";
@@ -55,9 +56,30 @@ export default function TasksScreen() {
 
   const [formVisible, setFormVisible] = useState(false);
   const [linkVisible, setLinkVisible] = useState(false);
+  // Görev Kopyalama (Kopyala → Yapıştır) panosu.
+  const clipboard = useTaskClipboard();
 
   const openCreate = useCallback(() => setFormVisible(true), []);
   const openDetail = useCallback((task: Task) => router.push(`/task/${task.id}`), []);
+
+  const handlePaste = useCallback(
+    async (categoryId: string | null, categoryName: string) => {
+      if (!clipboard?.sourceId) return;
+      try {
+        await api.duplicateTask(clipboard.sourceId, {
+          include_subtasks: clipboard.includeSubtasks,
+          include_attachments: clipboard.includeAttachments,
+          category_id: categoryId,
+        });
+        Alert.alert("Yapıştırıldı", `Görev → ${categoryName || "Kolsuz"}`);
+        load("silent");
+      } catch (e) {
+        Alert.alert("Hata", e instanceof ApiError ? e.message : "Yapıştırılamadı");
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [clipboard],
+  );
 
   const handleUnauthorized = useCallback(async () => {
     await logout();
@@ -297,6 +319,24 @@ export default function TasksScreen() {
         }
       />
 
+      {clipboard?.sourceId && (
+        <View style={styles.clipboardBar} testID={TASKS.clipboardBar}>
+          <Ionicons name="clipboard-outline" size={15} color={colors.primary} />
+          <Text style={styles.clipboardText} numberOfLines={1}>
+            Kopyalandı: {clipboard.title}
+          </Text>
+          <Pressable
+            testID={TASKS.clipboardClear}
+            onPress={() => clearTaskClipboard()}
+            hitSlop={8}
+            style={({ pressed }) => [styles.clipboardClear, pressed && styles.pressed]}
+          >
+            <Ionicons name="close" size={13} color={colors.danger} />
+            <Text style={styles.clipboardClearText}>Temizle</Text>
+          </Pressable>
+        </View>
+      )}
+
       <View style={styles.toolbar}>
         <View style={styles.searchBox}>
           <Ionicons name="search" size={16} color={colors.textMuted} />
@@ -457,6 +497,8 @@ export default function TasksScreen() {
               busyId={busyId}
               highlight={search}
               groupBadges={groupBadges}
+              pasteVisible={!!clipboard?.sourceId}
+              onPaste={handlePaste}
             />
           ))}
           <View style={{ height: spacing.xl }} />
@@ -495,6 +537,22 @@ export default function TasksScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bgBase },
+  clipboardBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    borderRadius: radius.md,
+    backgroundColor: colors.primary + "18",
+  },
+  clipboardText: { flex: 1, color: colors.primary, fontSize: 12, fontFamily: monoFont },
+  clipboardClear: { flexDirection: "row", alignItems: "center", gap: 3 },
+  clipboardClearText: { color: colors.danger, fontSize: 12, fontFamily: monoFont },
   toolbar: {
     flexDirection: "row",
     alignItems: "center",

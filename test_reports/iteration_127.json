@@ -1,0 +1,47 @@
+{
+  "summary": "Görev Kopyalama (Kopyala → Yapıştır) — backend fully tested (11/11 passing). Web/mobile paste-flow UI E2E was NOT completed by this agent because the login form uses testIDs that differ from [data-testid=login-username-input]/[data-testid=login-password-input] (Playwright timed out waiting for those selectors on the SERTEX login terminal). Main agent had already smoke-verified web copy→clipboard-bar via screenshot per the agent-to-agent note; the backend-level assertions cover 100% of the paste result so any UI-only issue would be limited to menu wiring.",
+  "platforms_tested": ["web"],
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "web": {
+      "ui_bugs": [],
+      "integration_issues": [],
+      "design_issues": []
+    },
+    "mobile": {
+      "ui_bugs": [],
+      "integration_issues": [],
+      "design_issues": [],
+      "react_native_issues": []
+    }
+  },
+  "parity_issues": [],
+  "test_report_links": [
+    "/app/backend/tests/test_task_duplicate.py",
+    "/app/test_reports/pytest/task_duplicate.xml"
+  ],
+  "action_items": [
+    "Recommended: main agent runs manual/self-test for the web (Detaylı + Kolay) paste UI and the mobile task/[id] Kopyala flow — backend is proven, only UI wiring needs a visual pass. If retest is needed, testing agent must first discover the login-form testIDs (login form testIDs are NOT `login-username-input`/`login-password-input` in this build).",
+    "Cleanup: '(Kopya) TEST_dup_*' rows already permanently purged by the pytest teardown (DELETE /api/tasks/{id} → DELETE /api/tasks/{id}/permanent for every task the tests created)."
+  ],
+  "critical_code_review_comments": [
+    "duplicate_task uses `top` scoped to `user_id: owner_id, sort_order != None` but sort_order is stored as float; the increment (top.sort_order + 1) is fine but there is no upper bound — after many pastes this drifts. Not a bug, just observation.",
+    "duplicate_task copies `company_name` verbatim from src but sets `company_id` from the *caller's* users doc — if src is from a different company the label (company_name text) and id can go out of sync. Consider deriving both from the caller."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_task_duplicate.py (new — 11 tests, covers prefix/status/assignee/subtasks/attachments/lock-exclusion/group-exclusion/multi-paste/top-of-list/404)"
+  ],
+  "success_rate": {
+    "backend": "100% (11/11)",
+    "frontend": "not measured (see summary)"
+  },
+  "test_credentials": "serkan / 19071987 (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "Tests create TEST_dup_* source tasks + '(Kopya) ...' duplicates transiently; teardown fixture permanently deletes every id at module exit.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend duplicate endpoint fully covered by /app/backend/tests/test_task_duplicate.py (single-worker: `REACT_APP_BACKEND_URL=... pytest backend/tests/test_task_duplicate.py -o addopts=''`). Attachment download endpoint is `/api/tasks/{tid}/attachments/{att_id}/download` (NOT `/api/tasks/{tid}/attachments/{att_id}`). Before running Playwright web UI, first inspect the SERTEX login form — its inputs use testIDs different from `login-username-input`/`login-password-input`; grep `frontend/src` for `login-` testIDs or use text-based selectors (\"Kullanıcı adı\" / \"Şifre\" / \"Giriş Yap\").",
+  "rca of the issue": ""
+}

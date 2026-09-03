@@ -123,6 +123,19 @@ export const api = {
     request<Task>(`/tasks/${id}`, { method: "PATCH", body: patch }),
   createTask: (body: TaskCreatePayload) =>
     request<Task>("/tasks", { method: "POST", body }),
+  // Görev Kopyalama (Kopyala → Yapıştır) — kaynağı çoğaltır, kopya bana atanır.
+  duplicateTask: (
+    id: string,
+    opts: { include_subtasks?: boolean; include_attachments?: boolean; category_id?: string | null } = {},
+  ) =>
+    request<Task>(`/tasks/${id}/duplicate`, {
+      method: "POST",
+      body: {
+        include_subtasks: opts.include_subtasks ?? true,
+        include_attachments: opts.include_attachments ?? true,
+        category_id: opts.category_id ?? null,
+      },
+    }),
   deleteTask: (id: string, reason?: string) =>
     request<{ deleted: number }>(`/tasks/${id}${reason ? `?reason=${encodeURIComponent(reason)}` : ""}`, { method: "DELETE" }),
   searchUsers: (q: string) =>

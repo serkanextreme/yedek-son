@@ -58,6 +58,7 @@ from .tasks_models import (
     TaskSharePerms,
     TaskShare,
     TaskCreate,
+    TaskDuplicateReq,
     TaskUpdate,
     ReorderTasksReq,
     CategoryOrderReq,
@@ -660,6 +661,97 @@ def build_tasks_router(db, licensed_user_dep, current_user_dep) -> APIRouter:
             except Exception:  # pragma: no cover
                 pass  # push is best-effort; task creation must not fail on FCM
         new_doc = await db.tasks.find_one({"id": t.id}, {"_id": 0})
+        return Task(**new_doc)
+
+    # ------------------------------------------------------------------
+    # GÖREV KOPYALAMA (Kopyala → Yapıştır) — kaynak görevi çoğaltır.
+    # Kopya işlemi yapan kullanıcıya atanır (aktif/beklemede), seçilen iş
+    # koluna (category_id) düşer, listenin başına gelir. Kilit/paylaşım/grup
+    # bağı KOPYALANMAZ (temiz başlar). NOT: /tasks/{tid} generic route'undan
+    # ayrı bir path (/duplicate) olduğu için çakışma yok.
+    # ------------------------------------------------------------------
+    @router.post("/tasks/{tid}/duplicate", response_model=Task)
+    async def duplicate_task(tid: str, req: TaskDuplicateReq, user: dict = Depends(licensed_user_dep)):
+        src = await db.tasks.find_one({"id": tid}, {"_id": 0})
+        if not src or not await _can_view_task(src, user):
+            raise HTTPException(status_code=404, detail="Görev bulunamadı")
+        owner_id = user["id"]
+        now = _now_iso()
+        # Kopyayı listenin en başına koy — mevcut en yüksek sort_order + 1.
+        top = await db.tasks.find_one(
+            {"user_id": owner_id, "sort_order": {"$ne": None}},
+            {"_id": 0, "sort_order": 1},
+            sort=[("sort_order", -1)],
+        )
+        new_sort = (float(top["sort_order"]) + 1.0) if top and top.get("sort_order") is not None else None
+        # Alt görevler — istenirse kopyala (yeni id + done=False, temiz başlar).
+        subs: List[dict] = []
+        if req.include_subtasks:
+            for s in (src.get("subtasks") or []):
+                subs.append(
+                    Subtask(
+                        text=s.get("text", ""),
+                        done=False,
+                        status="pending",
+                        due_date=s.get("due_date"),
+                    ).model_dump()
+                )
+        # Görev sahibinin şirketini çöz — kopya, kaynağın şirket bağlamını korur
+        # (company_id + company_name birlikte kaynaktan alınır → tutarsızlık yok).
+        title = f"(Kopya) {src.get('title', '')}".strip()[:500]
+        dup = Task(
+            title=title,
+            description=src.get("description", ""),
+            status="pending",
+            user_id=owner_id,
+            start_date=src.get("start_date"),
+            due_date=src.get("due_date"),
+            reminder_at=src.get("reminder_at"),
+            reminder_fired=False,
+            reminder_days=src.get("reminder_days"),
+            reminder_disabled=bool(src.get("reminder_disabled", False)),
+            reminder_interval_min=src.get("reminder_interval_min"),
+            reminder_repeat_total=src.get("reminder_repeat_total"),
+            reminder_repeat_left=src.get("reminder_repeat_total"),
+            subtasks=subs,
+            sort_order=new_sort,
+            category_id=req.category_id,
+            company_id=src.get("company_id"),
+            company_name=src.get("company_name"),
+            assignee_name=user.get("username"),
+            created_by=owner_id,
+            created_at=now,
+            updated_at=now,
+        )
+        await db.tasks.insert_one(dup.model_dump())
+        # Dosya ekleri — istenirse object storage'da çoğalt + yeni kayıt aç.
+        if req.include_attachments:
+            atts = await db.task_attachments.find(
+                {"task_id": tid, "is_deleted": {"$ne": True}}, {"_id": 0},
+            ).to_list(length=500)
+            for a in atts:
+                try:
+                    data, ct = await asyncio.to_thread(get_object, a["storage_path"])
+                    fname = a.get("original_filename") or "dosya"
+                    new_path = build_upload_path(owner_id, fname)
+                    result = await asyncio.to_thread(
+                        put_object, new_path, data, a.get("content_type") or ct,
+                    )
+                    canonical = result.get("path", new_path)
+                    natt = TaskAttachment(
+                        task_id=dup.id,
+                        company_id=dup.company_id,
+                        storage_path=canonical,
+                        original_filename=fname,
+                        content_type=a.get("content_type") or ct,
+                        size=int(a.get("size") or len(data)),
+                        uploaded_by=owner_id,
+                        uploaded_by_name=user.get("username"),
+                    )
+                    await db.task_attachments.insert_one(natt.model_dump())
+                except Exception:  # pragma: no cover — ek kopyalama best-effort
+                    log.exception("duplicate: attachment copy failed")
+        new_doc = await db.tasks.find_one({"id": dup.id}, {"_id": 0})
         return Task(**new_doc)
 
     @router.patch("/tasks/{tid}", response_model=Task)
@@ -1457,13 +1549,12 @@ def build_tasks_router(db, licensed_user_dep, current_user_dep) -> APIRouter:
     # Görebilen herkes yükler/indirir; siler: yükleyen veya sahip/müdür/admin.
     # ------------------------------------------------------------------
     _ATTACH_MAX_BYTES = 100 * 1024 * 1024  # 100 MB / dosya
-    _ATTACH_TMP_DIR = "/tmp/sertex_task_uploads"
-    # NOT: Yükleme oturumları bellek içinde (+ /tmp'de parça birleştirme) tutulur.
+    # NOT: Yükleme oturumları bellek içinde tutulur (parçalar RAM'de birleştirilir,
+    # pod-diskine YAZILMAZ) ve tamamlanınca Emergent object storage'a yüklenir.
     # Bu, backend'in TEK uvicorn worker ile çalıştığı varsayımına dayanır
     # (--workers 1). Çok worker'a geçilirse sticky-session veya Redis tabanlı
     # oturum deposu gerekir; aksi halde parçalar farklı worker'lara dağılır.
     _upload_sessions: Dict[str, Dict[str, Any]] = {}
-    os.makedirs(_ATTACH_TMP_DIR, exist_ok=True)
 
     def _attach_out(doc: dict) -> dict:
         return TaskAttachment(**doc).model_dump()
@@ -1492,9 +1583,6 @@ def build_tasks_router(db, licensed_user_dep, current_user_dep) -> APIRouter:
                 detail=f"Dosya çok büyük: {req.total_size/1024/1024:.1f} MB (maks 100 MB)",
             )
         upload_id = str(uuid.uuid4())
-        tmp_path = os.path.join(_ATTACH_TMP_DIR, upload_id)
-        # Boş dosya oluştur (append için).
-        open(tmp_path, "wb").close()
         _upload_sessions[upload_id] = {
             "task_id": tid,
             "user_id": user["id"],
@@ -1502,7 +1590,7 @@ def build_tasks_router(db, licensed_user_dep, current_user_dep) -> APIRouter:
             "content_type": req.content_type or "application/octet-stream",
             "total_size": int(req.total_size or 0),
             "received": 0,
-            "tmp_path": tmp_path,
+            "buffer": bytearray(),
         }
         return {"upload_id": upload_id}
 
@@ -1521,17 +1609,10 @@ def build_tasks_router(db, licensed_user_dep, current_user_dep) -> APIRouter:
         new_total = sess["received"] + len(data)
         if new_total > _ATTACH_MAX_BYTES:
             # Temizle ve reddet.
-            try:
-                os.remove(sess["tmp_path"])
-            except OSError:
-                pass
             _upload_sessions.pop(upload_id, None)
             raise HTTPException(status_code=400, detail="Dosya çok büyük (maks 100 MB)")
-        # Diske sırayla ekle (tek worker — güvenli).
-        def _append():
-            with open(sess["tmp_path"], "ab") as f:
-                f.write(data)
-        await asyncio.to_thread(_append)
+        # Belleğe sırayla ekle (tek worker — pod-diskine yazmaz).
+        sess["buffer"].extend(data)
         sess["received"] = new_total
         return {"received": new_total}
 
@@ -1544,12 +1625,8 @@ def build_tasks_router(db, licensed_user_dep, current_user_dep) -> APIRouter:
         if not doc or not await _can_view_task(doc, user):
             _upload_sessions.pop(req.upload_id, None)
             raise HTTPException(status_code=404, detail="Görev bulunamadı")
-        tmp_path = sess["tmp_path"]
         try:
-            def _read():
-                with open(tmp_path, "rb") as f:
-                    return f.read()
-            file_bytes = await asyncio.to_thread(_read)
+            file_bytes = bytes(sess["buffer"])
             if not file_bytes:
                 raise HTTPException(status_code=400, detail="Boş dosya")
             storage_path = build_upload_path(user["id"], sess["filename"])
@@ -1563,10 +1640,6 @@ def build_tasks_router(db, licensed_user_dep, current_user_dep) -> APIRouter:
             log.exception("Attachment upload to storage failed")
             raise HTTPException(status_code=502, detail=f"Depolama hatası: {str(exc)[:200]}")
         finally:
-            try:
-                os.remove(tmp_path)
-            except OSError:
-                pass
             _upload_sessions.pop(req.upload_id, None)
         att = TaskAttachment(
             task_id=tid,

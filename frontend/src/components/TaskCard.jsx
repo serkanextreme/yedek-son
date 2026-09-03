@@ -44,7 +44,7 @@ const taskDurationLabel = (start, end) => {
 };
 
 
-export const TaskCard = ({ task, displayNumber, onStatusChange, onDelete, onEdit, onSetReminder, onClearReminder, onSetSubtasks, onSetArchived, onReassign, onTransferCompany, onPromoteSubtask, onDemoteToSubtask, onDemoteChild, onPinNumber, onUnpinNumber, promotedChildren = [], dragControls, isTeamView, isHighlighted, categoryName, categories, onSetCategory, reminderConfig, onSetReminderDays, onSetReminderDisabled, currentUser, onLockChanged, collapsed = false, onToggleCollapse, detached = false, onToggleDetach, onNudge, nudgeCount = 0, onLinkTasks, onEditGroup, onRemoveFromGroup, onToggleDigestMute, highlight = "", archiveGroup = null, canPermanentDelete = false, onCancel, onUncancel, onRestore, onPermanentDelete, archiveSettings = null }) => {
+export const TaskCard = ({ task, displayNumber, onStatusChange, onDelete, onEdit, onCopy, onSetReminder, onClearReminder, onSetSubtasks, onSetArchived, onReassign, onTransferCompany, onPromoteSubtask, onDemoteToSubtask, onDemoteChild, onPinNumber, onUnpinNumber, promotedChildren = [], dragControls, isTeamView, isHighlighted, categoryName, categories, onSetCategory, reminderConfig, onSetReminderDays, onSetReminderDisabled, currentUser, onLockChanged, collapsed = false, onToggleCollapse, detached = false, onToggleDetach, onNudge, nudgeCount = 0, onLinkTasks, onEditGroup, onRemoveFromGroup, onToggleDigestMute, highlight = "", archiveGroup = null, canPermanentDelete = false, onCancel, onUncancel, onRestore, onPermanentDelete, archiveSettings = null }) => {
   const layer = dueSoonLayer(task, reminderConfig);
   const style = statusStyle(task, layer);
   const overdue = isOverdue(task);
@@ -297,6 +297,7 @@ export const TaskCard = ({ task, displayNumber, onStatusChange, onDelete, onEdit
   const handleAction = (action, extra) => {
     if (action === "delete") onDelete();
     else if (action === "edit") onEdit();
+    else if (action === "copy") onCopy?.();
     else if (action === "share") setShowShare(true);
     else if (action === "archive") onSetArchived(true);
     else if (action === "unarchive") onSetArchived(false);

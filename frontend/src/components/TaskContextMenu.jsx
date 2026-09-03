@@ -5,7 +5,7 @@ import {
   Check, Pause, Play, Trash2, Clock, AlertTriangle, Edit3, Bell,
   ChevronRight, BellOff, GripVertical, Archive, ArchiveRestore, UserPlus,
   Tag, Lock, Unlock, KeyRound, Share2, RefreshCw, Printer, FileSpreadsheet,
-  FileText, FileDown, Link2, Unlink, RotateCcw, CornerLeftUp, Anchor, Ban,
+  FileText, FileDown, Link2, Unlink, RotateCcw, CornerLeftUp, Anchor, Ban, Copy,
 } from "lucide-react";
 import { LOCK_KEY_LABELS } from "../lib/taskLocks";
 import { toast } from "sonner";
@@ -121,6 +121,14 @@ export const ContextMenu = ({ x, y, task, onAction, onClose, isTeamView, onReass
       label: "Düzenle",
       color: "text-sertex-cyan hover:bg-sertex-cyan/10",
       action: "edit",
+    },
+    // Görev Kopyalama — görevi panoya al; bir iş koluna sağ tıklayıp "Yapıştır"
+    // ile o iş kolunda yeni (bana atanan) kopya oluştur. Hazır şablon mantığı.
+    {
+      icon: Copy,
+      label: "Kopyala",
+      color: "text-sertex-cyan hover:bg-sertex-cyan/10",
+      action: "copy",
     },
     // Sıra numarasını sabitle — sürüklense de numara değişmez (⚓).
     {

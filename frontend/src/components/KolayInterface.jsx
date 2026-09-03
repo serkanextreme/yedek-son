@@ -42,6 +42,7 @@ import {
   Archive,
   Tag,
   RotateCcw,
+  ClipboardPaste,
 } from "lucide-react";
 import { toast } from "sonner";
 import { tasksApi, taskCategoriesApi, taskLockApi, notesApi, teamApi, reminderConfigApi, taskAttachmentsApi } from "../lib/api";
@@ -65,6 +66,9 @@ import { LockConfigModal } from "./tasks/LockConfigModal";
 import { UnlockOtpModal } from "./tasks/UnlockOtpModal";
 import { OtpDisplayModal } from "./tasks/OtpDisplayModal";
 import { LinkTasksModal } from "./tasks/LinkTasksModal";
+import { CopyTaskModal } from "./tasks/CopyTaskModal";
+import { TaskPasteMenu } from "./tasks/TaskPasteMenu";
+import { useTaskClipboard, clearTaskClipboard } from "../lib/taskClipboard";
 import { printTasks, exportTasksExcel, exportTasksWord } from "../lib/taskExport";
 
 // Son tarih + duruma göre basit durum rozeti (Sertex'te ayrı "öncelik" alanı yok).
@@ -676,6 +680,10 @@ const KolayInterface = ({ onOpenSettings, sidebarOpen, isMobile }) => {
   // ⋮ menü + modallar
   const [ctxMenu, setCtxMenu] = useState(null); // { task, x, y }
   const [editing, setEditing] = useState(null);
+  // Görev Kopyalama (Kopyala → Yapıştır) — Detaylı ile aynı pano.
+  const [copyModalTask, setCopyModalTask] = useState(null);
+  const [pasteMenu, setPasteMenu] = useState(null); // { x, y, categoryId, categoryName }
+  const clipboard = useTaskClipboard();
   const [sharing, setSharing] = useState(null);
   const [reassigning, setReassigning] = useState(null);
   const [lockConfig, setLockConfig] = useState(null);
@@ -788,6 +796,18 @@ const KolayInterface = ({ onOpenSettings, sidebarOpen, isMobile }) => {
       toast.success(`Görev → ${name}`); load();
     } catch (e) { toast.error(e?.response?.data?.detail || "Değiştirilemedi"); }
   };
+  // Görev Kopyalama — panodaki görevi hedef iş koluna çoğalt (Detaylı ile aynı).
+  const handlePaste = async (categoryId, categoryName) => {
+    if (!clipboard?.sourceId) return;
+    try {
+      await tasksApi.duplicate(clipboard.sourceId, {
+        include_subtasks: !!clipboard.includeSubtasks,
+        include_attachments: !!clipboard.includeAttachments,
+        category_id: categoryId || null,
+      });
+      toast.success(`Yapıştırıldı → ${categoryName || "Kolsuz"}`); load();
+    } catch (e) { toast.error(e?.response?.data?.detail || "Yapıştırılamadı"); }
+  };
   const setTaskReminderDays = async (id, days) => {
     try { await tasksApi.update(id, { reminder_days: days == null ? 0 : days, reminder_disabled: false }); toast.success(days == null ? "Uyarı: varsayılan" : `Uyarı: ${days} gün önce`); load(); }
     catch { toast.error("Değiştirilemedi"); }
@@ -837,6 +857,7 @@ const KolayInterface = ({ onOpenSettings, sidebarOpen, isMobile }) => {
   const handleAction = (task, action, extra) => {
     if (action === "delete") removeTask(task.id, task.title);
     else if (action === "edit") setEditing(task);
+    else if (action === "copy") setCopyModalTask(task);
     else if (action === "share") setSharing(task);
     else if (action === "archive") setArchived(task.id, true);
     else if (action === "unarchive") setArchived(task.id, false);
@@ -1073,6 +1094,24 @@ const KolayInterface = ({ onOpenSettings, sidebarOpen, isMobile }) => {
                 </button>
               </div>
 
+              {clipboard?.sourceId && (
+                <div
+                  data-testid="kolay-task-clipboard-bar"
+                  className="flex items-center gap-2 px-3 py-1.5 mb-3 rounded-lg border border-sertex-cyan/40 bg-sertex-cyan/5"
+                >
+                  <ClipboardPaste className="h-3.5 w-3.5 text-sertex-cyan shrink-0" />
+                  <span className="hud-text text-sertex-cyan truncate flex-1">Kopyalandı: {clipboard.title}</span>
+                  <span className="hud-text text-sertex-textMuted/70 text-[10px] hidden md:inline shrink-0">iş koluna sağ tıkla → Yapıştır</span>
+                  <button
+                    onClick={() => clearTaskClipboard()}
+                    data-testid="kolay-task-clipboard-clear"
+                    className="hud-text text-rose-300 hover:text-rose-200 flex items-center gap-1 shrink-0"
+                  >
+                    <X className="h-3 w-3" /> Panoyu Temizle
+                  </button>
+                </div>
+              )}
+
               {flatCats.length > 0 && (
                 <div className="flex items-center gap-2 mb-6 overflow-x-auto scrollbar-sertex pb-1" data-testid="kolay-cat-filter">
                   {[{ id: "", name: "Tümü" }, ...flatCats, { id: "__none__", name: "Kolsuz" }].map((c) => {
@@ -1082,6 +1121,16 @@ const KolayInterface = ({ onOpenSettings, sidebarOpen, isMobile }) => {
                         key={c.id || "all"}
                         type="button"
                         onClick={() => setCatFilter(c.id)}
+                        onContextMenu={(e) => {
+                          if (!clipboard?.sourceId || c.id === "") return; // "Tümü" hedef değil
+                          e.preventDefault();
+                          setPasteMenu({
+                            x: e.clientX,
+                            y: e.clientY,
+                            categoryId: c.id === "__none__" ? null : c.id,
+                            categoryName: c.name,
+                          });
+                        }}
                         data-testid={`kolay-cat-chip-${c.id || "all"}`}
                         style={{ flexShrink: 0 }}
                         className={`px-3 py-1.5 rounded-full border text-xs font-mono transition-colors whitespace-nowrap ${
@@ -1188,6 +1237,21 @@ const KolayInterface = ({ onOpenSettings, sidebarOpen, isMobile }) => {
       {/* Modallar — Neural Link ile aynı bileşenler */}
       {editing && (
         <EditTaskModal task={editing} onClose={() => setEditing(null)} onSave={saveEdit} isTeamView={false} categories={cats} teamMembers={[]} currentUser={user} />
+      )}
+      {/* Görev Kopyalama — Kopyala penceresi + iş koluna Yapıştır menüsü */}
+      {copyModalTask && (
+        <CopyTaskModal task={copyModalTask} onClose={() => setCopyModalTask(null)} />
+      )}
+      {pasteMenu && clipboard?.sourceId && (
+        <TaskPasteMenu
+          x={pasteMenu.x}
+          y={pasteMenu.y}
+          title={clipboard.title}
+          targetName={pasteMenu.categoryName || "Kolsuz"}
+          onPaste={() => handlePaste(pasteMenu.categoryId, pasteMenu.categoryName)}
+          onClear={() => clearTaskClipboard()}
+          onClose={() => setPasteMenu(null)}
+        />
       )}
       {sharing && (
         <ShareTaskModal task={sharing} onClose={() => setSharing(null)} onSaved={() => { setSharing(null); load(); }} />

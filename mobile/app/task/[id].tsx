@@ -3,6 +3,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Modal,
   Pressable,
   ScrollView,
@@ -21,6 +22,7 @@ import { GroupSection } from "@/src/components/GroupSection";
 import { LockSection } from "@/src/components/LockSection";
 import { useAuth } from "@/src/auth/AuthContext";
 import { TaskFormModal } from "@/src/components/TaskFormModal";
+import { CopyTaskModal } from "@/src/components/CopyTaskModal";
 import { formatDateTime, genId, statusMeta } from "@/src/lib/format";
 import { colors, monoFont, radius, spacing } from "@/src/theme/colors";
 import { DETAIL } from "@/constants/testIds";
@@ -44,6 +46,7 @@ export default function TaskDetailScreen() {
   const [error, setError] = useState<string | null>(null);
   const [newSub, setNewSub] = useState("");
   const [editVisible, setEditVisible] = useState(false);
+  const [copyVisible, setCopyVisible] = useState(false);
   const [policy, setPolicy] = useState<string>("optional");
   const [reasonMode, setReasonMode] = useState<null | "cancel" | "delete">(null);
   const [reasonText, setReasonText] = useState("");
@@ -341,6 +344,14 @@ export default function TaskDetailScreen() {
               <Ionicons name="trash-outline" size={18} color={colors.danger} />
               <Text style={[styles.actionText, { color: colors.danger }]}>Sil</Text>
             </Pressable>
+            <Pressable
+              testID={DETAIL.copy}
+              onPress={() => setCopyVisible(true)}
+              style={({ pressed }) => [styles.actionBtn, pressed && styles.pressed]}
+            >
+              <Ionicons name="copy-outline" size={18} color={colors.primary} />
+              <Text style={styles.actionText}>Kopyala</Text>
+            </Pressable>
           </View>
 
           <View style={styles.section}>
@@ -495,6 +506,18 @@ export default function TaskDetailScreen() {
           onSaved={load}
         />
       )}
+
+      <CopyTaskModal
+        visible={copyVisible}
+        task={task}
+        onClose={() => setCopyVisible(false)}
+        onCopied={() =>
+          Alert.alert(
+            "Panoya kopyalandı",
+            "Görevler ekranında bir iş kolu başlığındaki \"Yapıştır\" düğmesine dokunun.",
+          )
+        }
+      />
 
       <Modal
         visible={reassignVisible}

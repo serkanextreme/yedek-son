@@ -22,6 +22,7 @@ import {
   ExternalLink,
   Search,
   Trash2,
+  ClipboardPaste,
 } from "lucide-react";
 import { tasksApi, teamApi, taskCategoriesApi, reminderConfigApi, taskAttachmentsApi } from "../lib/api";
 import { openDetachedPanel } from "../lib/detachedPanels";
@@ -61,6 +62,9 @@ import { showReminderToast } from "../lib/reminderToast";
 import { confirmDialog, promptDialog } from "../lib/confirm";
 import { printTasks, exportTasksExcel, exportTasksWord } from "../lib/taskExport";
 import ExportSelectModal from "./ExportSelectModal";
+import { CopyTaskModal } from "./tasks/CopyTaskModal";
+import { TaskPasteMenu } from "./tasks/TaskPasteMenu";
+import { useTaskClipboard, clearTaskClipboard } from "../lib/taskClipboard";
 
 // Faz 9 CP6 — TasksPanel bileşenleri ayrı dosyalara taşındı (davranış birebir aynı).
 import { TaskCard } from "./TaskCard";
@@ -285,6 +289,10 @@ const TasksPanel = ({ refreshSignal, onDataChanged, detached = false, initialCat
   const [dragOverCatId, setDragOverCatId] = useState(null);
   // Görev → İş Kolu sürükle-bırakta imlecin o an üstünde olduğu çip.
   const [taskDragOverCatId, setTaskDragOverCatId] = useState(null);
+  // Görev Kopyalama (Kopyala → Yapıştır).
+  const [copyModalTask, setCopyModalTask] = useState(null);
+  const [pasteMenu, setPasteMenu] = useState(null); // { x, y, categoryId, categoryName }
+  const clipboard = useTaskClipboard();
   const orderedCategories = useMemo(() => {
     if (!catOrder.length) return categories;
     const pos = new Map(catOrder.map((id, i) => [id, i]));
@@ -1098,6 +1106,24 @@ const TasksPanel = ({ refreshSignal, onDataChanged, detached = false, initialCat
     }
   };
 
+  // Görev Kopyalama — panodaki görevi hedef iş koluna (categoryId; null =
+  // KOLSUZ) çoğalt. Pano temizlenene kadar durur → çok kez yapıştırılabilir.
+  const handlePaste = async (categoryId, categoryName) => {
+    if (!clipboard?.sourceId) return;
+    try {
+      await tasksApi.duplicate(clipboard.sourceId, {
+        include_subtasks: !!clipboard.includeSubtasks,
+        include_attachments: !!clipboard.includeAttachments,
+        category_id: categoryId || null,
+      });
+      toast.success(`Yapıştırıldı → ${categoryName || "Kolsuz"}`);
+      load();
+      onDataChanged?.();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Yapıştırılamadı");
+    }
+  };
+
   // Faz 8 CP5 — task-level due-soon overrides via context menu.
   const setTaskReminderDays = async (id, days) => {
     try {
@@ -1376,6 +1402,7 @@ const TasksPanel = ({ refreshSignal, onDataChanged, detached = false, initialCat
     onStatusChange: (status) => setStatus(t.id, status),
     onDelete: () => removeTask(t.id),
     onEdit: () => setEditing(t),
+    onCopy: () => setCopyModalTask(t),
     onSetReminder: (iso, opts) => setReminder(t.id, iso, opts),
     onClearReminder: () => clearReminder(t.id),
     onSetSubtasks: (subs) => setSubtasks(t.id, subs),
@@ -1752,6 +1779,11 @@ const TasksPanel = ({ refreshSignal, onDataChanged, detached = false, initialCat
           onDragOver={(e) => { e.preventDefault(); if (dragOverCatId !== node.id) setDragOverCatId(node.id); }}
           onDrop={(e) => { e.preventDefault(); handleCatDrop(node.id); }}
           onDragEnd={() => { setDragCatId(null); setDragOverCatId(null); }}
+          onContextMenu={(e) => {
+            if (!clipboard?.sourceId) return; // pano boşsa tarayıcı menüsü açılsın
+            e.preventDefault();
+            setPasteMenu({ x: e.clientX, y: e.clientY, categoryId: node.id, categoryName: node.name });
+          }}
           data-testid={`category-node-${node.name}`}
           style={{ marginLeft: depth * 14 }}
           title="Sürükleyerek aynı seviyede sırala · görevi buraya bırakınca bu iş koluna taşınır"
@@ -2135,6 +2167,29 @@ const TasksPanel = ({ refreshSignal, onDataChanged, detached = false, initialCat
         </div>
       )}
 
+      {/* Görev Kopyalama panosu — dolu iken göster (iş koluna sağ tık → Yapıştır) */}
+      {clipboard?.sourceId && !showArchived && (
+        <div
+          data-testid="task-clipboard-bar"
+          className="flex items-center gap-2 px-3 py-1.5 rounded-md border border-sertex-cyan/40 bg-sertex-cyan/5"
+        >
+          <ClipboardPaste className="h-3.5 w-3.5 text-sertex-cyan shrink-0" />
+          <span className="hud-text text-sertex-cyan truncate flex-1">
+            Kopyalandı: {clipboard.title}
+          </span>
+          <span className="hud-text text-sertex-textMuted/70 text-[10px] hidden md:inline shrink-0">
+            iş koluna sağ tıkla → Yapıştır
+          </span>
+          <button
+            onClick={() => clearTaskClipboard()}
+            data-testid="task-clipboard-clear"
+            className="hud-text text-rose-300 hover:text-rose-200 flex items-center gap-1 shrink-0"
+          >
+            <X className="h-3 w-3" /> Panoyu Temizle
+          </button>
+        </div>
+      )}
+
       {/* İş Kolu FİLTRE ağacı — tıklanabilir, açılır-kapanır liste (ana kol → alt kol) */}
       {categories.length > 0 && !showArchived && (
         <div className="flex flex-col gap-1" data-testid="category-filter-bar">
@@ -2163,6 +2218,11 @@ const TasksPanel = ({ refreshSignal, onDataChanged, detached = false, initialCat
           {catForest.map((node) => renderFilterNode(node, 0))}
           <button
             onClick={() => setCategoryFilter("__none__")}
+            onContextMenu={(e) => {
+              if (!clipboard?.sourceId) return;
+              e.preventDefault();
+              setPasteMenu({ x: e.clientX, y: e.clientY, categoryId: null, categoryName: "Kolsuz" });
+            }}
             data-testid="category-chip-none"
             data-cat-drop="__none__"
             title="Görevi buraya bırakınca iş kolundan çıkarılır"
@@ -2735,6 +2795,21 @@ const TasksPanel = ({ refreshSignal, onDataChanged, detached = false, initialCat
           categories={categories}
           teamMembers={teamMembers}
           currentUser={user}
+        />
+      )}
+      {/* Görev Kopyalama — Kopyala penceresi + iş koluna Yapıştır menüsü */}
+      {copyModalTask && (
+        <CopyTaskModal task={copyModalTask} onClose={() => setCopyModalTask(null)} />
+      )}
+      {pasteMenu && clipboard?.sourceId && (
+        <TaskPasteMenu
+          x={pasteMenu.x}
+          y={pasteMenu.y}
+          title={clipboard.title}
+          targetName={pasteMenu.categoryName || "Kolsuz"}
+          onPaste={() => handlePaste(pasteMenu.categoryId, pasteMenu.categoryName)}
+          onClear={() => clearTaskClipboard()}
+          onClose={() => setPasteMenu(null)}
         />
       )}
       {/* GÖREV BAĞLAMA — görevleri bağla / grubu düzenle modalı */}

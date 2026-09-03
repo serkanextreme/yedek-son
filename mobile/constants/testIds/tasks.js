@@ -22,6 +22,10 @@ export const TASKS = {
   hideEmpty: 'tasks-hide-empty-toggle',
   companyFilter: 'tasks-company-filter',
   companySearch: 'tasks-company-search',
+  // Görev Kopyalama (Kopyala → Yapıştır)
+  categoryPaste: 'tasks-category-paste',
+  clipboardBar: 'tasks-clipboard-bar',
+  clipboardClear: 'tasks-clipboard-clear',
 };
 
 // Görev Bağlama modalı (LinkTasksModal) — tasks ekranı + detay grup düzenleme.

@@ -273,6 +273,18 @@ class TaskCreate(BaseModel):
     assignee_user_ids: Optional[List[str]] = None
 
 
+class TaskDuplicateReq(BaseModel):
+    # Görev Kopyalama (Kopyala → Yapıştır). Kaynak görevi çoğaltıp yeni bir
+    # görev oluşturur; kopya, işlemi yapan kullanıcıya atanır (aktif/beklemede).
+    #   include_subtasks    → alt görevleri de kopyala (kopyada done=False başlar)
+    #   include_attachments → dosya eklerini de kopyala (object storage'da çoğaltılır)
+    #   category_id         → yapıştırılan iş kolu (None = KOLSUZ). Her zaman
+    #                         yapıştırma hedefiyle set edilir.
+    include_subtasks: bool = True
+    include_attachments: bool = True
+    category_id: Optional[str] = None
+
+
 class TaskUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
