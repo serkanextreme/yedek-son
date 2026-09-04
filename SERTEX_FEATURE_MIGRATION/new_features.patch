@@ -1,0 +1,3809 @@
+diff --git a/backend/routers/tasks_models.py b/backend/routers/tasks_models.py
+index 92c4b25..5b60c6a 100644
+--- a/backend/routers/tasks_models.py
++++ b/backend/routers/tasks_models.py
+@@ -273,6 +273,18 @@ class TaskCreate(BaseModel):
+     assignee_user_ids: Optional[List[str]] = None
+ 
+ 
++class TaskDuplicateReq(BaseModel):
++    # Görev Kopyalama (Kopyala → Yapıştır). Kaynak görevi çoğaltıp yeni bir
++    # görev oluşturur; kopya, işlemi yapan kullanıcıya atanır (aktif/beklemede).
++    #   include_subtasks    → alt görevleri de kopyala (kopyada done=False başlar)
++    #   include_attachments → dosya eklerini de kopyala (object storage'da çoğaltılır)
++    #   category_id         → yapıştırılan iş kolu (None = KOLSUZ). Her zaman
++    #                         yapıştırma hedefiyle set edilir.
++    include_subtasks: bool = True
++    include_attachments: bool = True
++    category_id: Optional[str] = None
++
++
+ class TaskUpdate(BaseModel):
+     title: Optional[str] = None
+     description: Optional[str] = None
+diff --git a/backend/routers/tasks_router.py b/backend/routers/tasks_router.py
+index daf26e0..4b09ff4 100644
+--- a/backend/routers/tasks_router.py
++++ b/backend/routers/tasks_router.py
+@@ -58,6 +58,7 @@ from .tasks_models import (
+     TaskSharePerms,
+     TaskShare,
+     TaskCreate,
++    TaskDuplicateReq,
+     TaskUpdate,
+     ReorderTasksReq,
+     CategoryOrderReq,
+@@ -662,6 +663,97 @@ def build_tasks_router(db, licensed_user_dep, current_user_dep) -> APIRouter:
+         new_doc = await db.tasks.find_one({"id": t.id}, {"_id": 0})
+         return Task(**new_doc)
+ 
++    # ------------------------------------------------------------------
++    # GÖREV KOPYALAMA (Kopyala → Yapıştır) — kaynak görevi çoğaltır.
++    # Kopya işlemi yapan kullanıcıya atanır (aktif/beklemede), seçilen iş
++    # koluna (category_id) düşer, listenin başına gelir. Kilit/paylaşım/grup
++    # bağı KOPYALANMAZ (temiz başlar). NOT: /tasks/{tid} generic route'undan
++    # ayrı bir path (/duplicate) olduğu için çakışma yok.
++    # ------------------------------------------------------------------
++    @router.post("/tasks/{tid}/duplicate", response_model=Task)
++    async def duplicate_task(tid: str, req: TaskDuplicateReq, user: dict = Depends(licensed_user_dep)):
++        src = await db.tasks.find_one({"id": tid}, {"_id": 0})
++        if not src or not await _can_view_task(src, user):
++            raise HTTPException(status_code=404, detail="Görev bulunamadı")
++        owner_id = user["id"]
++        now = _now_iso()
++        # Kopyayı listenin en başına koy — mevcut en yüksek sort_order + 1.
++        top = await db.tasks.find_one(
++            {"user_id": owner_id, "sort_order": {"$ne": None}},
++            {"_id": 0, "sort_order": 1},
++            sort=[("sort_order", -1)],
++        )
++        new_sort = (float(top["sort_order"]) + 1.0) if top and top.get("sort_order") is not None else None
++        # Alt görevler — istenirse kopyala (yeni id + done=False, temiz başlar).
++        subs: List[dict] = []
++        if req.include_subtasks:
++            for s in (src.get("subtasks") or []):
++                subs.append(
++                    Subtask(
++                        text=s.get("text", ""),
++                        done=False,
++                        status="pending",
++                        due_date=s.get("due_date"),
++                    ).model_dump()
++                )
++        # Görev sahibinin şirketini çöz — kopya, kaynağın şirket bağlamını korur
++        # (company_id + company_name birlikte kaynaktan alınır → tutarsızlık yok).
++        title = f"(Kopya) {src.get('title', '')}".strip()[:500]
++        dup = Task(
++            title=title,
++            description=src.get("description", ""),
++            status="pending",
++            user_id=owner_id,
++            start_date=src.get("start_date"),
++            due_date=src.get("due_date"),
++            reminder_at=src.get("reminder_at"),
++            reminder_fired=False,
++            reminder_days=src.get("reminder_days"),
++            reminder_disabled=bool(src.get("reminder_disabled", False)),
++            reminder_interval_min=src.get("reminder_interval_min"),
++            reminder_repeat_total=src.get("reminder_repeat_total"),
++            reminder_repeat_left=src.get("reminder_repeat_total"),
++            subtasks=subs,
++            sort_order=new_sort,
++            category_id=req.category_id,
++            company_id=src.get("company_id"),
++            company_name=src.get("company_name"),
++            assignee_name=user.get("username"),
++            created_by=owner_id,
++            created_at=now,
++            updated_at=now,
++        )
++        await db.tasks.insert_one(dup.model_dump())
++        # Dosya ekleri — istenirse object storage'da çoğalt + yeni kayıt aç.
++        if req.include_attachments:
++            atts = await db.task_attachments.find(
++                {"task_id": tid, "is_deleted": {"$ne": True}}, {"_id": 0},
++            ).to_list(length=500)
++            for a in atts:
++                try:
++                    data, ct = await asyncio.to_thread(get_object, a["storage_path"])
++                    fname = a.get("original_filename") or "dosya"
++                    new_path = build_upload_path(owner_id, fname)
++                    result = await asyncio.to_thread(
++                        put_object, new_path, data, a.get("content_type") or ct,
++                    )
++                    canonical = result.get("path", new_path)
++                    natt = TaskAttachment(
++                        task_id=dup.id,
++                        company_id=dup.company_id,
++                        storage_path=canonical,
++                        original_filename=fname,
++                        content_type=a.get("content_type") or ct,
++                        size=int(a.get("size") or len(data)),
++                        uploaded_by=owner_id,
++                        uploaded_by_name=user.get("username"),
++                    )
++                    await db.task_attachments.insert_one(natt.model_dump())
++                except Exception:  # pragma: no cover — ek kopyalama best-effort
++                    log.exception("duplicate: attachment copy failed")
++        new_doc = await db.tasks.find_one({"id": dup.id}, {"_id": 0})
++        return Task(**new_doc)
++
+     @router.patch("/tasks/{tid}", response_model=Task)
+     async def update_task(tid: str, req: TaskUpdate, user: dict = Depends(licensed_user_dep)):
+         doc = await db.tasks.find_one({"id": tid}, {"_id": 0})
+@@ -1457,13 +1549,12 @@ def build_tasks_router(db, licensed_user_dep, current_user_dep) -> APIRouter:
+     # Görebilen herkes yükler/indirir; siler: yükleyen veya sahip/müdür/admin.
+     # ------------------------------------------------------------------
+     _ATTACH_MAX_BYTES = 100 * 1024 * 1024  # 100 MB / dosya
+-    _ATTACH_TMP_DIR = "/tmp/sertex_task_uploads"
+-    # NOT: Yükleme oturumları bellek içinde (+ /tmp'de parça birleştirme) tutulur.
++    # NOT: Yükleme oturumları bellek içinde tutulur (parçalar RAM'de birleştirilir,
++    # pod-diskine YAZILMAZ) ve tamamlanınca Emergent object storage'a yüklenir.
+     # Bu, backend'in TEK uvicorn worker ile çalıştığı varsayımına dayanır
+     # (--workers 1). Çok worker'a geçilirse sticky-session veya Redis tabanlı
+     # oturum deposu gerekir; aksi halde parçalar farklı worker'lara dağılır.
+     _upload_sessions: Dict[str, Dict[str, Any]] = {}
+-    os.makedirs(_ATTACH_TMP_DIR, exist_ok=True)
+ 
+     def _attach_out(doc: dict) -> dict:
+         return TaskAttachment(**doc).model_dump()
+@@ -1492,9 +1583,6 @@ def build_tasks_router(db, licensed_user_dep, current_user_dep) -> APIRouter:
+                 detail=f"Dosya çok büyük: {req.total_size/1024/1024:.1f} MB (maks 100 MB)",
+             )
+         upload_id = str(uuid.uuid4())
+-        tmp_path = os.path.join(_ATTACH_TMP_DIR, upload_id)
+-        # Boş dosya oluştur (append için).
+-        open(tmp_path, "wb").close()
+         _upload_sessions[upload_id] = {
+             "task_id": tid,
+             "user_id": user["id"],
+@@ -1502,7 +1590,7 @@ def build_tasks_router(db, licensed_user_dep, current_user_dep) -> APIRouter:
+             "content_type": req.content_type or "application/octet-stream",
+             "total_size": int(req.total_size or 0),
+             "received": 0,
+-            "tmp_path": tmp_path,
++            "buffer": bytearray(),
+         }
+         return {"upload_id": upload_id}
+ 
+@@ -1521,17 +1609,10 @@ def build_tasks_router(db, licensed_user_dep, current_user_dep) -> APIRouter:
+         new_total = sess["received"] + len(data)
+         if new_total > _ATTACH_MAX_BYTES:
+             # Temizle ve reddet.
+-            try:
+-                os.remove(sess["tmp_path"])
+-            except OSError:
+-                pass
+             _upload_sessions.pop(upload_id, None)
+             raise HTTPException(status_code=400, detail="Dosya çok büyük (maks 100 MB)")
+-        # Diske sırayla ekle (tek worker — güvenli).
+-        def _append():
+-            with open(sess["tmp_path"], "ab") as f:
+-                f.write(data)
+-        await asyncio.to_thread(_append)
++        # Belleğe sırayla ekle (tek worker — pod-diskine yazmaz).
++        sess["buffer"].extend(data)
+         sess["received"] = new_total
+         return {"received": new_total}
+ 
+@@ -1544,12 +1625,8 @@ def build_tasks_router(db, licensed_user_dep, current_user_dep) -> APIRouter:
+         if not doc or not await _can_view_task(doc, user):
+             _upload_sessions.pop(req.upload_id, None)
+             raise HTTPException(status_code=404, detail="Görev bulunamadı")
+-        tmp_path = sess["tmp_path"]
+         try:
+-            def _read():
+-                with open(tmp_path, "rb") as f:
+-                    return f.read()
+-            file_bytes = await asyncio.to_thread(_read)
++            file_bytes = bytes(sess["buffer"])
+             if not file_bytes:
+                 raise HTTPException(status_code=400, detail="Boş dosya")
+             storage_path = build_upload_path(user["id"], sess["filename"])
+@@ -1563,10 +1640,6 @@ def build_tasks_router(db, licensed_user_dep, current_user_dep) -> APIRouter:
+             log.exception("Attachment upload to storage failed")
+             raise HTTPException(status_code=502, detail=f"Depolama hatası: {str(exc)[:200]}")
+         finally:
+-            try:
+-                os.remove(tmp_path)
+-            except OSError:
+-                pass
+             _upload_sessions.pop(req.upload_id, None)
+         att = TaskAttachment(
+             task_id=tid,
+diff --git a/backend/routers/templates_router.py b/backend/routers/templates_router.py
+new file mode 100644
+index 0000000..9f9152a
+--- /dev/null
++++ b/backend/routers/templates_router.py
+@@ -0,0 +1,422 @@
++"""Sertex — Görev Şablonları (Task Templates) router.
++
++Factory: `build_templates_router(db, licensed_user_dep)` → APIRouter (no prefix).
++
++Amaç: Sık kullanılan görevleri "şablon" olarak sakla; "Yeni Görev" akışında
++şablondan başlat (instantiate) → gerçek görev oluşur, kullanıcı düzenler.
++
++Tasarım kararı (hiçbir mevcut akışı bozmamak için): şablonlar AYRI koleksiyonda
++(`task_templates`) tutulur, böylece görev sorgularına (liste/istatistik/arşiv/
++zamanlayıcı) ASLA sızmaz. Şablon dosya ekleri de ayrı koleksiyonda
++(`task_template_attachments`). "Şablondan başlat" ise mevcut `tasks` +
++`task_attachments` içine kopyalar (Görev Kopyalama'daki storage-kopya mantığı).
++
++Kapsam:
++  * scope="personal" → yalnızca sahibi görür/kullanır
++  * scope="shared"   → sahibinin şirketindeki herkes görür/kullanır
++"""
++from datetime import datetime, timezone
++from typing import Any, Dict, List, Optional
++import asyncio
++import logging
++import uuid
++
++from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Response, Query
++from pydantic import BaseModel, Field
++from urllib.parse import quote
++
++from permissions import acting_role, get_user_company_ids
++from storage_service import put_object, get_object, build_upload_path
++from .tasks_models import Subtask, Task, TaskAttachment, AttachmentInitReq, AttachmentCompleteReq, _now_iso
++
++log = logging.getLogger(__name__)
++
++_TPL_ATTACH_MAX_BYTES = 100 * 1024 * 1024  # 100 MB / dosya
++
++
++# ---------------------------------------------------------------------------
++# Modeller
++# ---------------------------------------------------------------------------
++class TaskTemplate(BaseModel):
++    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
++    name: str                                   # şablon adı (ör. "Haftalık Rapor")
++    title: str = ""                             # oluşacak görevin başlığı
++    description: str = ""
++    category_id: Optional[str] = None
++    reminder_days: Optional[int] = None
++    reminder_disabled: bool = False
++    subtasks: List[dict] = Field(default_factory=list)   # [{id, text}]
++    scope: str = "personal"                     # personal | shared
++    company_id: Optional[str] = None            # shared için sahibinin şirketi
++    owner_id: str
++    created_by: str
++    created_by_name: Optional[str] = None
++    created_at: str = Field(default_factory=_now_iso)
++    updated_at: str = Field(default_factory=_now_iso)
++
++
++class TaskTemplateCreate(BaseModel):
++    name: str
++    title: str = ""
++    description: str = ""
++    category_id: Optional[str] = None
++    reminder_days: Optional[int] = None
++    reminder_disabled: bool = False
++    subtasks: List[dict] = Field(default_factory=list)
++    scope: str = "personal"
++
++
++class TaskTemplateUpdate(BaseModel):
++    name: Optional[str] = None
++    title: Optional[str] = None
++    description: Optional[str] = None
++    category_id: Optional[str] = None
++    reminder_days: Optional[int] = None
++    reminder_disabled: Optional[bool] = None
++    subtasks: Optional[List[dict]] = None
++    scope: Optional[str] = None
++
++
++class TemplateInstantiateReq(BaseModel):
++    # None → şablonun kendi iş kolu kullanılır. Bir değer verilirse onunla yaz.
++    category_id: Optional[str] = None
++
++
++def _clean_subtasks(items: Optional[List[dict]]) -> List[dict]:
++    out: List[dict] = []
++    for s in items or []:
++        text = (s.get("text") or "").strip() if isinstance(s, dict) else ""
++        if not text:
++            continue
++        out.append({"id": (s.get("id") if isinstance(s, dict) else None) or str(uuid.uuid4()), "text": text[:500]})
++    return out
++
++
++def build_templates_router(db, licensed_user_dep) -> APIRouter:
++    router = APIRouter()
++    _tpl_upload_sessions: Dict[str, Dict[str, Any]] = {}
++
++    def _tpl_out(doc: dict) -> TaskTemplate:
++        doc.setdefault("subtasks", [])
++        return TaskTemplate(**doc)
++
++    def _can_view_template(tpl: dict, user: dict) -> bool:
++        if acting_role(user) == "admin":
++            return True
++        if tpl.get("owner_id") == user["id"]:
++            return True
++        if tpl.get("scope") == "shared":
++            cids = get_user_company_ids(user) or ([user.get("company_id")] if user.get("company_id") else [])
++            return tpl.get("company_id") in cids
++        return False
++
++    def _can_manage_template(tpl: dict, user: dict) -> bool:
++        if acting_role(user) == "admin":
++            return True
++        return tpl.get("created_by") == user["id"] or tpl.get("owner_id") == user["id"]
++
++    # ------------------------------------------------------------------
++    # CRUD
++    # ------------------------------------------------------------------
++    @router.get("/task-templates", response_model=List[TaskTemplate])
++    async def list_templates(user: dict = Depends(licensed_user_dep)):
++        uid = user["id"]
++        if acting_role(user) == "admin":
++            q: Dict[str, Any] = {}
++        else:
++            cids = get_user_company_ids(user) or ([user.get("company_id")] if user.get("company_id") else [])
++            ors: List[dict] = [{"owner_id": uid}]
++            if cids:
++                ors.append({"scope": "shared", "company_id": {"$in": cids}})
++            q = {"$or": ors}
++        rows = await db.task_templates.find(q, {"_id": 0}).sort("created_at", -1).to_list(length=500)
++        return [_tpl_out(r) for r in rows]
++
++    @router.post("/task-templates", response_model=TaskTemplate)
++    async def create_template(req: TaskTemplateCreate, user: dict = Depends(licensed_user_dep)):
++        name = (req.name or "").strip()
++        if len(name) < 2:
++            raise HTTPException(status_code=400, detail="Şablon adı en az 2 karakter olmalı")
++        scope = "shared" if req.scope == "shared" else "personal"
++        company_id = user.get("company_id")
++        if scope == "shared" and not company_id:
++            # Şirketi olmayan kullanıcı ortak şablon oluşturamaz → kişisele düşür.
++            scope = "personal"
++        tpl = TaskTemplate(
++            name=name,
++            title=(req.title or "").strip(),
++            description=(req.description or "").strip(),
++            category_id=req.category_id or None,
++            reminder_days=req.reminder_days,
++            reminder_disabled=bool(req.reminder_disabled),
++            subtasks=_clean_subtasks(req.subtasks),
++            scope=scope,
++            company_id=company_id if scope == "shared" else None,
++            owner_id=user["id"],
++            created_by=user["id"],
++            created_by_name=user.get("username"),
++        )
++        await db.task_templates.insert_one(tpl.model_dump())
++        return tpl
++
++    @router.get("/task-templates/{tpl_id}", response_model=TaskTemplate)
++    async def get_template(tpl_id: str, user: dict = Depends(licensed_user_dep)):
++        tpl = await db.task_templates.find_one({"id": tpl_id}, {"_id": 0})
++        if not tpl or not _can_view_template(tpl, user):
++            raise HTTPException(status_code=404, detail="Şablon bulunamadı")
++        return _tpl_out(tpl)
++
++    @router.patch("/task-templates/{tpl_id}", response_model=TaskTemplate)
++    async def update_template(tpl_id: str, req: TaskTemplateUpdate, user: dict = Depends(licensed_user_dep)):
++        tpl = await db.task_templates.find_one({"id": tpl_id}, {"_id": 0})
++        if not tpl:
++            raise HTTPException(status_code=404, detail="Şablon bulunamadı")
++        if not _can_manage_template(tpl, user):
++            raise HTTPException(status_code=403, detail="Bu şablonu düzenleme yetkiniz yok")
++        upd: Dict[str, Any] = {}
++        if req.name is not None:
++            n = req.name.strip()
++            if len(n) < 2:
++                raise HTTPException(status_code=400, detail="Şablon adı en az 2 karakter olmalı")
++            upd["name"] = n
++        if req.title is not None:
++            upd["title"] = req.title.strip()
++        if req.description is not None:
++            upd["description"] = req.description.strip()
++        if req.category_id is not None:
++            upd["category_id"] = req.category_id or None
++        if req.reminder_days is not None:
++            upd["reminder_days"] = req.reminder_days
++        if req.reminder_disabled is not None:
++            upd["reminder_disabled"] = bool(req.reminder_disabled)
++        if req.subtasks is not None:
++            upd["subtasks"] = _clean_subtasks(req.subtasks)
++        if req.scope is not None:
++            new_scope = "shared" if req.scope == "shared" else "personal"
++            if new_scope == "shared":
++                cid = user.get("company_id") or tpl.get("company_id")
++                if not cid:
++                    raise HTTPException(status_code=400, detail="Ortak şablon için şirket gerekli")
++                upd["scope"] = "shared"
++                upd["company_id"] = cid
++            else:
++                upd["scope"] = "personal"
++                upd["company_id"] = None
++        upd["updated_at"] = _now_iso()
++        await db.task_templates.update_one({"id": tpl_id}, {"$set": upd})
++        out = await db.task_templates.find_one({"id": tpl_id}, {"_id": 0})
++        return _tpl_out(out)
++
++    @router.delete("/task-templates/{tpl_id}")
++    async def delete_template(tpl_id: str, user: dict = Depends(licensed_user_dep)):
++        tpl = await db.task_templates.find_one({"id": tpl_id}, {"_id": 0})
++        if not tpl:
++            return {"deleted": 0}
++        if not _can_manage_template(tpl, user):
++            raise HTTPException(status_code=403, detail="Bu şablonu silme yetkiniz yok")
++        await db.task_templates.delete_one({"id": tpl_id})
++        # Şablon dosya eklerini de kalıcı sil (ayrı koleksiyon).
++        await db.task_template_attachments.delete_many({"task_id": tpl_id})
++        return {"deleted": 1}
++
++    # ------------------------------------------------------------------
++    # Şablondan başlat — gerçek görev oluştur (kopya bana atanır, üstte)
++    # ------------------------------------------------------------------
++    @router.post("/task-templates/{tpl_id}/instantiate", response_model=Task)
++    async def instantiate_template(tpl_id: str, req: TemplateInstantiateReq, user: dict = Depends(licensed_user_dep)):
++        tpl = await db.task_templates.find_one({"id": tpl_id}, {"_id": 0})
++        if not tpl or not _can_view_template(tpl, user):
++            raise HTTPException(status_code=404, detail="Şablon bulunamadı")
++        owner_id = user["id"]
++        now = _now_iso()
++        top = await db.tasks.find_one(
++            {"user_id": owner_id, "sort_order": {"$ne": None}},
++            {"_id": 0, "sort_order": 1},
++            sort=[("sort_order", -1)],
++        )
++        new_sort = (float(top["sort_order"]) + 1.0) if top and top.get("sort_order") is not None else None
++        subs = [
++            Subtask(text=s.get("text", ""), done=False, status="pending").model_dump()
++            for s in (tpl.get("subtasks") or []) if (s.get("text") or "").strip()
++        ]
++        owner_doc = await db.users.find_one({"id": owner_id}, {"_id": 0, "company_id": 1, "company_name": 1})
++        category_id = req.category_id if req.category_id is not None else tpl.get("category_id")
++        task = Task(
++            title=(tpl.get("title") or tpl.get("name") or "Görev"),
++            description=tpl.get("description", ""),
++            status="pending",
++            user_id=owner_id,
++            reminder_days=tpl.get("reminder_days"),
++            reminder_disabled=bool(tpl.get("reminder_disabled", False)),
++            subtasks=subs,
++            sort_order=new_sort,
++            category_id=category_id,
++            company_id=(owner_doc or {}).get("company_id"),
++            company_name=(owner_doc or {}).get("company_name"),
++            assignee_name=user.get("username"),
++            created_by=owner_id,
++            created_at=now,
++            updated_at=now,
++        )
++        await db.tasks.insert_one(task.model_dump())
++        # Şablon dosya eklerini → yeni görevin eklerine kopyala (storage-copy).
++        atts = await db.task_template_attachments.find(
++            {"task_id": tpl_id, "is_deleted": {"$ne": True}}, {"_id": 0},
++        ).to_list(length=500)
++        for a in atts:
++            try:
++                data, ct = await asyncio.to_thread(get_object, a["storage_path"])
++                fname = a.get("original_filename") or "dosya"
++                new_path = build_upload_path(owner_id, fname)
++                result = await asyncio.to_thread(put_object, new_path, data, a.get("content_type") or ct)
++                canonical = result.get("path", new_path)
++                natt = TaskAttachment(
++                    task_id=task.id,
++                    company_id=task.company_id,
++                    storage_path=canonical,
++                    original_filename=fname,
++                    content_type=a.get("content_type") or ct,
++                    size=int(a.get("size") or len(data)),
++                    uploaded_by=owner_id,
++                    uploaded_by_name=user.get("username"),
++                )
++                await db.task_attachments.insert_one(natt.model_dump())
++            except Exception:  # pragma: no cover — ek kopyalama best-effort
++                log.exception("instantiate: template attachment copy failed")
++        out = await db.tasks.find_one({"id": task.id}, {"_id": 0})
++        return Task(**out)
++
++    # ------------------------------------------------------------------
++    # Şablon dosya ekleri — chunked upload + object storage (ayrı koleksiyon)
++    # ------------------------------------------------------------------
++    @router.get("/task-templates/{tpl_id}/attachments")
++    async def list_tpl_attachments(tpl_id: str, user: dict = Depends(licensed_user_dep)):
++        tpl = await db.task_templates.find_one({"id": tpl_id}, {"_id": 0})
++        if not tpl or not _can_view_template(tpl, user):
++            raise HTTPException(status_code=404, detail="Şablon bulunamadı")
++        rows = await db.task_template_attachments.find(
++            {"task_id": tpl_id, "is_deleted": {"$ne": True}}, {"_id": 0},
++        ).sort("created_at", -1).to_list(length=500)
++        return [TaskAttachment(**r).model_dump() for r in rows]
++
++    @router.post("/task-templates/{tpl_id}/attachments/init")
++    async def init_tpl_attachment(tpl_id: str, req: AttachmentInitReq, user: dict = Depends(licensed_user_dep)):
++        tpl = await db.task_templates.find_one({"id": tpl_id}, {"_id": 0})
++        if not tpl or not _can_manage_template(tpl, user):
++            raise HTTPException(status_code=404, detail="Şablon bulunamadı")
++        fname = (req.filename or "dosya.bin").strip()[:255]
++        if not fname:
++            raise HTTPException(status_code=400, detail="Dosya adı gerekli")
++        if req.total_size and req.total_size > _TPL_ATTACH_MAX_BYTES:
++            raise HTTPException(status_code=400, detail="Dosya çok büyük (maks 100 MB)")
++        upload_id = str(uuid.uuid4())
++        _tpl_upload_sessions[upload_id] = {
++            "tpl_id": tpl_id,
++            "user_id": user["id"],
++            "filename": fname,
++            "content_type": req.content_type or "application/octet-stream",
++            "received": 0,
++            "buffer": bytearray(),
++        }
++        return {"upload_id": upload_id}
++
++    @router.post("/task-templates/{tpl_id}/attachments/chunk")
++    async def upload_tpl_chunk(
++        tpl_id: str,
++        upload_id: str = Form(...),
++        index: int = Form(0),
++        chunk: UploadFile = File(...),
++        user: dict = Depends(licensed_user_dep),
++    ):
++        sess = _tpl_upload_sessions.get(upload_id)
++        if not sess or sess["user_id"] != user["id"] or sess["tpl_id"] != tpl_id:
++            raise HTTPException(status_code=404, detail="Yükleme oturumu bulunamadı")
++        data = await chunk.read()
++        new_total = sess["received"] + len(data)
++        if new_total > _TPL_ATTACH_MAX_BYTES:
++            _tpl_upload_sessions.pop(upload_id, None)
++            raise HTTPException(status_code=400, detail="Dosya çok büyük (maks 100 MB)")
++        sess["buffer"].extend(data)
++        sess["received"] = new_total
++        return {"received": new_total}
++
++    @router.post("/task-templates/{tpl_id}/attachments/complete", response_model=TaskAttachment)
++    async def complete_tpl_attachment(tpl_id: str, req: AttachmentCompleteReq, user: dict = Depends(licensed_user_dep)):
++        sess = _tpl_upload_sessions.get(req.upload_id)
++        if not sess or sess["user_id"] != user["id"] or sess["tpl_id"] != tpl_id:
++            raise HTTPException(status_code=404, detail="Yükleme oturumu bulunamadı")
++        tpl = await db.task_templates.find_one({"id": tpl_id}, {"_id": 0})
++        if not tpl or not _can_manage_template(tpl, user):
++            _tpl_upload_sessions.pop(req.upload_id, None)
++            raise HTTPException(status_code=404, detail="Şablon bulunamadı")
++        try:
++            file_bytes = bytes(sess["buffer"])
++            if not file_bytes:
++                raise HTTPException(status_code=400, detail="Boş dosya")
++            storage_path = build_upload_path(user["id"], sess["filename"])
++            result = await asyncio.to_thread(put_object, storage_path, file_bytes, sess["content_type"])
++            canonical = result.get("path", storage_path)
++        except HTTPException:
++            raise
++        except Exception as exc:
++            log.exception("Template attachment upload failed")
++            raise HTTPException(status_code=502, detail=f"Depolama hatası: {str(exc)[:200]}")
++        finally:
++            _tpl_upload_sessions.pop(req.upload_id, None)
++        att = TaskAttachment(
++            task_id=tpl_id,
++            company_id=tpl.get("company_id"),
++            storage_path=canonical,
++            original_filename=sess["filename"],
++            content_type=sess["content_type"],
++            size=len(file_bytes),
++            uploaded_by=user["id"],
++            uploaded_by_name=user.get("username"),
++        )
++        await db.task_template_attachments.insert_one(att.model_dump())
++        return att
++
++    @router.get("/task-templates/{tpl_id}/attachments/{att_id}/download")
++    async def download_tpl_attachment(tpl_id: str, att_id: str, user: dict = Depends(licensed_user_dep)):
++        tpl = await db.task_templates.find_one({"id": tpl_id}, {"_id": 0})
++        if not tpl or not _can_view_template(tpl, user):
++            raise HTTPException(status_code=404, detail="Şablon bulunamadı")
++        rec = await db.task_template_attachments.find_one(
++            {"id": att_id, "task_id": tpl_id, "is_deleted": {"$ne": True}}, {"_id": 0},
++        )
++        if not rec:
++            raise HTTPException(status_code=404, detail="Dosya bulunamadı")
++        try:
++            data, ct = await asyncio.to_thread(get_object, rec["storage_path"])
++        except Exception:
++            log.exception("Template attachment download failed")
++            raise HTTPException(status_code=502, detail="Depolamadan indirme başarısız")
++        raw_name = rec.get("original_filename") or "dosya"
++        ascii_name = raw_name.replace('"', "'")
++        return Response(
++            content=data,
++            media_type=rec.get("content_type") or ct,
++            headers={
++                "Content-Disposition": (
++                    f'attachment; filename="{ascii_name}"; '
++                    f"filename*=UTF-8''{quote(raw_name)}"
++                )
++            },
++        )
++
++    @router.delete("/task-templates/{tpl_id}/attachments/{att_id}")
++    async def delete_tpl_attachment(tpl_id: str, att_id: str, user: dict = Depends(licensed_user_dep)):
++        tpl = await db.task_templates.find_one({"id": tpl_id}, {"_id": 0})
++        if not tpl or not _can_manage_template(tpl, user):
++            raise HTTPException(status_code=404, detail="Şablon bulunamadı")
++        rec = await db.task_template_attachments.find_one(
++            {"id": att_id, "task_id": tpl_id, "is_deleted": {"$ne": True}}, {"_id": 0},
++        )
++        if not rec:
++            raise HTTPException(status_code=404, detail="Dosya bulunamadı")
++        await db.task_template_attachments.update_one(
++            {"id": att_id}, {"$set": {"is_deleted": True, "deleted_at": _now_iso()}},
++        )
++        return {"deleted": 1}
++
++    return router
+diff --git a/backend/server.py b/backend/server.py
+index 84a6a82..f19a5bd 100644
+--- a/backend/server.py
++++ b/backend/server.py
+@@ -309,6 +309,9 @@ from permissions_router import build_permissions_router
+ app.include_router(build_permissions_router(db, current_user), prefix="/api")
+ # Faz 9 refactor — tasks + categories + orphans live in their own module.
+ app.include_router(build_tasks_router(db, licensed_user, current_user), prefix="/api")
++# Görev Şablonları (Task Templates) — sık kullanılan görevleri şablonla, hızlı oluştur.
++from routers.templates_router import build_templates_router
++app.include_router(build_templates_router(db, licensed_user), prefix="/api")
+ # Faz 9 refactor — team + notifications + weather.
+ from routers.team_router import build_team_router
+ app.include_router(build_team_router(db, licensed_user, current_user, require_admin), prefix="/api")
+diff --git a/backend/tests/test_task_duplicate.py b/backend/tests/test_task_duplicate.py
+new file mode 100644
+index 0000000..52cc7f7
+--- /dev/null
++++ b/backend/tests/test_task_duplicate.py
+@@ -0,0 +1,353 @@
++"""Sertex — Task Duplicate (Kopyala → Yapıştır) backend tests.
++
++Verifies POST /api/tasks/{tid}/duplicate:
++  - title prefix "(Kopya) "
++  - status=pending, assignee=işlemi yapan (serkan), category_id=body
++  - subtasks: include_subtasks=True copies + done=False; False → empty
++  - attachments: include_attachments=True duplicates in storage (new path,
++    same bytes); False → none
++  - lock/sharing/group ties are NOT copied
++  - multi-paste: same source → multiple copies in different categories
++"""
++import io
++import os
++import uuid
++import pytest
++import requests
++
++BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "").rstrip("/")
++assert BASE_URL, "REACT_APP_BACKEND_URL not set"
++
++USERNAME = "serkan"
++PASSWORD = "19071987"
++
++# Cleanup registry: task ids to purge (permanent delete) at teardown.
++_CREATED_TASK_IDS: list[str] = []
++
++
++@pytest.fixture(scope="module")
++def token() -> str:
++    r = requests.post(
++        f"{BASE_URL}/api/auth/login",
++        json={"username": USERNAME, "password": PASSWORD},
++        timeout=15,
++    )
++    assert r.status_code == 200, f"login failed: {r.status_code} {r.text}"
++    return r.json()["token"]
++
++
++@pytest.fixture(scope="module")
++def client(token: str) -> requests.Session:
++    s = requests.Session()
++    s.headers.update({
++        "Authorization": f"Bearer {token}",
++        "Content-Type": "application/json",
++    })
++    return s
++
++
++@pytest.fixture(scope="module")
++def me(client: requests.Session) -> dict:
++    r = client.get(f"{BASE_URL}/api/auth/me", timeout=10)
++    assert r.status_code == 200
++    return r.json()
++
++
++@pytest.fixture(scope="module")
++def a_category(client: requests.Session) -> dict:
++    """Return any manageable category for serkan (paste target)."""
++    r = client.get(f"{BASE_URL}/api/task-categories?scope=manage", timeout=10)
++    assert r.status_code == 200
++    cats = r.json()
++    assert cats, "No categories available for serkan"
++    return cats[0]
++
++
++@pytest.fixture(scope="module")
++def a_category_2(client: requests.Session) -> dict:
++    """A different category — for the multi-paste parity test."""
++    r = client.get(f"{BASE_URL}/api/task-categories?scope=manage", timeout=10)
++    cats = r.json()
++    assert len(cats) >= 2, "Need at least 2 categories for multi-paste test"
++    return cats[1]
++
++
++def _mk_task(client: requests.Session, **overrides) -> dict:
++    payload = {
++        "title": f"TEST_dup_src_{uuid.uuid4().hex[:8]}",
++        "description": "kaynak görev — duplicate testi",
++    }
++    payload.update(overrides)
++    r = client.post(f"{BASE_URL}/api/tasks", json=payload, timeout=10)
++    assert r.status_code == 200, r.text
++    t = r.json()
++    _CREATED_TASK_IDS.append(t["id"])
++    return t
++
++
++def _upload_attachment(client: requests.Session, tid: str, content: bytes, fname: str) -> dict:
++    """Upload one small attachment via the init → chunk → complete flow."""
++    init = client.post(
++        f"{BASE_URL}/api/tasks/{tid}/attachments/init",
++        json={"filename": fname, "content_type": "text/plain", "total_size": len(content)},
++        timeout=10,
++    )
++    assert init.status_code == 200, f"attach init: {init.status_code} {init.text}"
++    upload_id = init.json()["upload_id"]
++    # Chunk (single-part) — multipart form, not JSON
++    files = {"chunk": (fname, io.BytesIO(content), "application/octet-stream")}
++    data = {"upload_id": upload_id, "index": "0"}
++    # Send without JSON content-type; use a raw request
++    raw = requests.post(
++        f"{BASE_URL}/api/tasks/{tid}/attachments/chunk",
++        headers={"Authorization": client.headers["Authorization"]},
++        files=files, data=data, timeout=30,
++    )
++    assert raw.status_code == 200, f"attach chunk: {raw.status_code} {raw.text}"
++    complete = client.post(
++        f"{BASE_URL}/api/tasks/{tid}/attachments/complete",
++        json={"upload_id": upload_id},
++        timeout=30,
++    )
++    assert complete.status_code == 200, f"attach complete: {complete.status_code} {complete.text}"
++    return complete.json()
++
++
++class TestDuplicateBasic:
++    def test_duplicate_basic_prefix_status_assignee(self, client, me, a_category):
++        src = _mk_task(client, title="TEST_dup_basic")
++        r = client.post(
++            f"{BASE_URL}/api/tasks/{src['id']}/duplicate",
++            json={"include_subtasks": True, "include_attachments": True, "category_id": a_category["id"]},
++            timeout=15,
++        )
++        assert r.status_code == 200, r.text
++        dup = r.json()
++        _CREATED_TASK_IDS.append(dup["id"])
++        # Assertions
++        assert dup["id"] != src["id"]
++        assert dup["title"].startswith("(Kopya) ")
++        assert "TEST_dup_basic" in dup["title"]
++        assert dup["status"] == "pending"
++        assert dup["user_id"] == me["id"]
++        assert dup["created_by"] == me["id"]
++        assert dup["category_id"] == a_category["id"]
++        # Fresh state — should not inherit archive/deleted/cancelled flags
++        assert dup.get("archived") in (False, None)
++        assert dup.get("deleted") in (False, None)
++        assert dup.get("cancelled") in (False, None)
++
++    def test_duplicate_no_category_kolsuz(self, client):
++        src = _mk_task(client, title="TEST_dup_kolsuz")
++        r = client.post(
++            f"{BASE_URL}/api/tasks/{src['id']}/duplicate",
++            json={"include_subtasks": False, "include_attachments": False, "category_id": None},
++            timeout=15,
++        )
++        assert r.status_code == 200
++        dup = r.json()
++        _CREATED_TASK_IDS.append(dup["id"])
++        assert dup.get("category_id") in (None, "")
++
++
++class TestDuplicateSubtasks:
++    def test_include_subtasks_copies_and_resets_done(self, client, a_category):
++        # source with two subtasks — one done
++        src = _mk_task(client, title="TEST_dup_subs_yes")
++        pr = client.patch(
++            f"{BASE_URL}/api/tasks/{src['id']}",
++            json={"subtasks": [
++                {"text": "adım 1", "done": True, "status": "done"},
++                {"text": "adım 2", "done": False, "status": "pending"},
++            ]},
++            timeout=10,
++        )
++        assert pr.status_code == 200
++        r = client.post(
++            f"{BASE_URL}/api/tasks/{src['id']}/duplicate",
++            json={"include_subtasks": True, "include_attachments": False, "category_id": a_category["id"]},
++            timeout=15,
++        )
++        assert r.status_code == 200
++        dup = r.json()
++        _CREATED_TASK_IDS.append(dup["id"])
++        subs = dup.get("subtasks") or []
++        assert len(subs) == 2
++        assert [s["text"] for s in subs] == ["adım 1", "adım 2"]
++        # Rule: kopyada 'yapılmadı' başlar
++        assert all(s.get("done") is False for s in subs)
++        assert all(s.get("status") == "pending" for s in subs)
++
++    def test_exclude_subtasks_yields_empty(self, client, a_category):
++        src = _mk_task(client, title="TEST_dup_subs_no")
++        client.patch(
++            f"{BASE_URL}/api/tasks/{src['id']}",
++            json={"subtasks": [{"text": "a"}, {"text": "b"}]},
++            timeout=10,
++        )
++        r = client.post(
++            f"{BASE_URL}/api/tasks/{src['id']}/duplicate",
++            json={"include_subtasks": False, "include_attachments": False, "category_id": a_category["id"]},
++            timeout=15,
++        )
++        assert r.status_code == 200
++        dup = r.json()
++        _CREATED_TASK_IDS.append(dup["id"])
++        assert (dup.get("subtasks") or []) == []
++
++
++class TestDuplicateAttachments:
++    def test_include_attachments_duplicates_in_storage(self, client, a_category):
++        src = _mk_task(client, title="TEST_dup_att_yes")
++        content = b"hello-dup-payload-xyz-" + uuid.uuid4().hex.encode()
++        _upload_attachment(client, src["id"], content, "orig.txt")
++        # Duplicate
++        r = client.post(
++            f"{BASE_URL}/api/tasks/{src['id']}/duplicate",
++            json={"include_subtasks": False, "include_attachments": True, "category_id": a_category["id"]},
++            timeout=30,
++        )
++        assert r.status_code == 200, r.text
++        dup = r.json()
++        _CREATED_TASK_IDS.append(dup["id"])
++        # Fetch attachment lists for both
++        la_src = client.get(f"{BASE_URL}/api/tasks/{src['id']}/attachments", timeout=10)
++        la_dup = client.get(f"{BASE_URL}/api/tasks/{dup['id']}/attachments", timeout=10)
++        assert la_src.status_code == 200 and la_dup.status_code == 200, (la_src.text, la_dup.text)
++        src_atts = la_src.json()
++        dup_atts = la_dup.json()
++        assert len(src_atts) == 1
++        assert len(dup_atts) == 1, f"expected 1 dup attachment, got {dup_atts}"
++        # storage_path must differ (new object)
++        assert src_atts[0]["storage_path"] != dup_atts[0]["storage_path"]
++        assert src_atts[0]["original_filename"] == dup_atts[0]["original_filename"]
++        # Download both — same content
++        dl_src = client.get(f"{BASE_URL}/api/tasks/{src['id']}/attachments/{src_atts[0]['id']}/download", timeout=15)
++        dl_dup = client.get(f"{BASE_URL}/api/tasks/{dup['id']}/attachments/{dup_atts[0]['id']}/download", timeout=15)
++        assert dl_src.status_code == 200 and dl_dup.status_code == 200
++        assert dl_src.content == dl_dup.content == content
++
++    def test_exclude_attachments_yields_none(self, client, a_category):
++        src = _mk_task(client, title="TEST_dup_att_no")
++        _upload_attachment(client, src["id"], b"ignore-me", "skip.txt")
++        r = client.post(
++            f"{BASE_URL}/api/tasks/{src['id']}/duplicate",
++            json={"include_subtasks": False, "include_attachments": False, "category_id": a_category["id"]},
++            timeout=30,
++        )
++        assert r.status_code == 200
++        dup = r.json()
++        _CREATED_TASK_IDS.append(dup["id"])
++        la = client.get(f"{BASE_URL}/api/tasks/{dup['id']}/attachments", timeout=10)
++        assert la.status_code == 200
++        assert la.json() == []
++
++
++class TestDuplicateExclusions:
++    def test_lock_flags_not_copied(self, client, a_category):
++        """Kilit bağı KOPYALANMAZ — kaynakta lock_flags set olsa bile
++        kopya temiz başlar."""
++        src = _mk_task(client, title="TEST_dup_locks")
++        # As admin (serkan), set a lock on the task
++        lr = client.patch(
++            f"{BASE_URL}/api/tasks/{src['id']}/locks",
++            json={"lock_flags": {"lock_edit": True, "lock_delete": True}, "requires_otp": True},
++            timeout=10,
++        )
++        # Endpoint may or may not exist; if it errors, skip assertion but still duplicate
++        r = client.post(
++            f"{BASE_URL}/api/tasks/{src['id']}/duplicate",
++            json={"include_subtasks": False, "include_attachments": False, "category_id": a_category["id"]},
++            timeout=15,
++        )
++        assert r.status_code == 200
++        dup = r.json()
++        _CREATED_TASK_IDS.append(dup["id"])
++        # Copy MUST NOT inherit lock flags
++        assert not any((dup.get("lock_flags") or {}).values()), f"lock_flags leaked: {dup.get('lock_flags')}"
++        assert not any((dup.get("self_lock_flags") or {}).values())
++        assert not dup.get("locked_at")
++
++    def test_group_not_copied(self, client, a_category):
++        """Grup bağı KOPYALANMAZ."""
++        src = _mk_task(client, title="TEST_dup_group")
++        # Force a group_id manually via PATCH — if server rejects, that's OK
++        # (we just need to confirm the copy has none)
++        gc = client.post(
++            f"{BASE_URL}/api/task-groups",
++            json={"name": "TEST_dup_group", "task_ids": [src["id"]]},
++            timeout=10,
++        )
++        # Some deployments may not have this endpoint — degrade gracefully
++        r = client.post(
++            f"{BASE_URL}/api/tasks/{src['id']}/duplicate",
++            json={"include_subtasks": False, "include_attachments": False, "category_id": a_category["id"]},
++            timeout=15,
++        )
++        assert r.status_code == 200
++        dup = r.json()
++        _CREATED_TASK_IDS.append(dup["id"])
++        assert not dup.get("group_id")
++
++
++class TestDuplicateMultiPaste:
++    def test_same_source_pasted_into_two_categories(self, client, a_category, a_category_2):
++        """Aynı görev birden fazla iş koluna yapıştırılabilir."""
++        src = _mk_task(client, title="TEST_dup_multi_paste")
++        r1 = client.post(
++            f"{BASE_URL}/api/tasks/{src['id']}/duplicate",
++            json={"include_subtasks": False, "include_attachments": False, "category_id": a_category["id"]},
++            timeout=15,
++        )
++        r2 = client.post(
++            f"{BASE_URL}/api/tasks/{src['id']}/duplicate",
++            json={"include_subtasks": False, "include_attachments": False, "category_id": a_category_2["id"]},
++            timeout=15,
++        )
++        assert r1.status_code == 200 and r2.status_code == 200
++        d1, d2 = r1.json(), r2.json()
++        _CREATED_TASK_IDS.extend([d1["id"], d2["id"]])
++        assert d1["id"] != d2["id"]
++        assert d1["category_id"] == a_category["id"]
++        assert d2["category_id"] == a_category_2["id"]
++        # Both should be at the top of the list (sort_order highest)
++        assert d1.get("sort_order") is not None
++        assert d2.get("sort_order") is not None
++
++    def test_top_of_list_ordering(self, client, a_category):
++        """Kopya listenin başına gelir — sort_order en yüksek olmalı."""
++        # Snapshot current top
++        lst = client.get(f"{BASE_URL}/api/tasks", timeout=10).json()
++        top_before = max((t.get("sort_order") or 0) for t in lst) if lst else 0
++        src = _mk_task(client, title="TEST_dup_top")
++        r = client.post(
++            f"{BASE_URL}/api/tasks/{src['id']}/duplicate",
++            json={"include_subtasks": False, "include_attachments": False, "category_id": a_category["id"]},
++            timeout=15,
++        )
++        assert r.status_code == 200
++        dup = r.json()
++        _CREATED_TASK_IDS.append(dup["id"])
++        assert (dup.get("sort_order") or 0) > top_before
++
++
++class TestDuplicateNotFound:
++    def test_unknown_task_404(self, client):
++        r = client.post(
++            f"{BASE_URL}/api/tasks/does-not-exist-xyz/duplicate",
++            json={"include_subtasks": False, "include_attachments": False, "category_id": None},
++            timeout=10,
++        )
++        assert r.status_code == 404
++
++
++# --- Teardown: permanently purge every task created by this module -----------
++@pytest.fixture(scope="module", autouse=True)
++def _cleanup(client):
++    yield
++    for tid in list(dict.fromkeys(_CREATED_TASK_IDS)):
++        try:
++            client.delete(f"{BASE_URL}/api/tasks/{tid}", timeout=10)
++            client.delete(f"{BASE_URL}/api/tasks/{tid}/permanent", timeout=10)
++        except Exception:
++            pass
+diff --git a/backend/tests/test_task_templates.py b/backend/tests/test_task_templates.py
+new file mode 100644
+index 0000000..badb1b3
+--- /dev/null
++++ b/backend/tests/test_task_templates.py
+@@ -0,0 +1,169 @@
++"""Sertex — Görev Şablonları (Task Templates) backend tests.
++
++Verifies /api/task-templates/*:
++  - create (name/title/desc/subtasks/scope) + list + get + update + delete
++  - subtasks stored as {id, text}
++  - instantiate → real task (status=pending, assignee=serkan, subtasks done=False)
++  - template attachments (chunked upload) + instantiate copies them to the task
++  - validation: short name → 400; unknown template → 404
++Cleans up every created template + task at teardown.
++"""
++import io
++import os
++import pytest
++import requests
++
++BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "").rstrip("/")
++assert BASE_URL, "REACT_APP_BACKEND_URL not set"
++
++USERNAME = "serkan"
++PASSWORD = "19071987"
++
++_TPL_IDS: list[str] = []
++_TASK_IDS: list[str] = []
++
++
++@pytest.fixture(scope="module")
++def client() -> requests.Session:
++    r = requests.post(
++        f"{BASE_URL}/api/auth/login",
++        json={"username": USERNAME, "password": PASSWORD},
++        timeout=15,
++    )
++    assert r.status_code == 200, f"login failed: {r.status_code} {r.text}"
++    s = requests.Session()
++    s.headers.update({"Authorization": f"Bearer {r.json()['token']}", "Content-Type": "application/json"})
++    return s
++
++
++@pytest.fixture(scope="module", autouse=True)
++def _cleanup(client: requests.Session):
++    yield
++    for tid in _TASK_IDS:
++        try:
++            client.delete(f"{BASE_URL}/api/tasks/{tid}/permanent", timeout=10)
++        except Exception:
++            pass
++    for tpl in _TPL_IDS:
++        try:
++            client.delete(f"{BASE_URL}/api/task-templates/{tpl}", timeout=10)
++        except Exception:
++            pass
++
++
++def _create_tpl(client, **over):
++    body = {
++        "name": over.get("name", "Test Şablon"),
++        "title": over.get("title", "Şablon görevi"),
++        "description": over.get("description", "açıklama"),
++        "subtasks": over.get("subtasks", [{"text": "adım 1"}, {"text": "adım 2"}]),
++        "scope": over.get("scope", "personal"),
++        "reminder_days": over.get("reminder_days", 3),
++    }
++    r = client.post(f"{BASE_URL}/api/task-templates", json=body, timeout=15)
++    assert r.status_code == 200, f"{r.status_code} {r.text}"
++    d = r.json()
++    _TPL_IDS.append(d["id"])
++    return d
++
++
++def test_create_list_get(client):
++    tpl = _create_tpl(client, name="CRUD Şablon")
++    assert tpl["name"] == "CRUD Şablon"
++    assert len(tpl["subtasks"]) == 2
++    assert all(s.get("id") and s.get("text") for s in tpl["subtasks"])
++    assert tpl["scope"] == "personal"
++    # list
++    r = client.get(f"{BASE_URL}/api/task-templates", timeout=10)
++    assert r.status_code == 200
++    assert any(t["id"] == tpl["id"] for t in r.json())
++    # get
++    r = client.get(f"{BASE_URL}/api/task-templates/{tpl['id']}", timeout=10)
++    assert r.status_code == 200 and r.json()["id"] == tpl["id"]
++
++
++def test_update(client):
++    tpl = _create_tpl(client, name="Güncellenecek")
++    r = client.patch(
++        f"{BASE_URL}/api/task-templates/{tpl['id']}",
++        json={"name": "Güncellendi", "title": "Yeni başlık", "subtasks": [{"text": "tek adım"}]},
++        timeout=15,
++    )
++    assert r.status_code == 200, r.text
++    d = r.json()
++    assert d["name"] == "Güncellendi"
++    assert d["title"] == "Yeni başlık"
++    assert len(d["subtasks"]) == 1
++
++
++def test_short_name_rejected(client):
++    r = client.post(f"{BASE_URL}/api/task-templates", json={"name": "x"}, timeout=10)
++    assert r.status_code == 400
++
++
++def test_unknown_template_404(client):
++    r = client.get(f"{BASE_URL}/api/task-templates/nope-{os.urandom(4).hex()}", timeout=10)
++    assert r.status_code == 404
++
++
++def test_instantiate_creates_task(client):
++    tpl = _create_tpl(client, name="Kur Şablon", title="Şablondan görev", subtasks=[{"text": "a"}, {"text": "b"}])
++    r = client.post(f"{BASE_URL}/api/task-templates/{tpl['id']}/instantiate", json={}, timeout=15)
++    assert r.status_code == 200, r.text
++    task = r.json()
++    _TASK_IDS.append(task["id"])
++    assert task["title"] == "Şablondan görev"
++    assert task["status"] == "pending"
++    assert task["assignee_name"] == USERNAME
++    texts = [(s["text"], s["done"]) for s in task["subtasks"]]
++    assert texts == [("a", False), ("b", False)]
++
++
++def test_template_attachment_and_instantiate_copy(client):
++    tpl = _create_tpl(client, name="Ekli Şablon", subtasks=[])
++    tid = tpl["id"]
++    # init
++    r = client.post(
++        f"{BASE_URL}/api/task-templates/{tid}/attachments/init",
++        json={"filename": "not.txt", "content_type": "text/plain", "total_size": 11},
++        timeout=15,
++    )
++    assert r.status_code == 200, r.text
++    upload_id = r.json()["upload_id"]
++    # chunk (multipart — no JSON content-type)
++    files = {"chunk": ("not.txt", io.BytesIO(b"merhaba dny"), "text/plain")}
++    data = {"upload_id": upload_id, "index": "0"}
++    r = client.post(
++        f"{BASE_URL}/api/task-templates/{tid}/attachments/chunk",
++        files=files, data=data,
++        headers={"Content-Type": None},
++        timeout=20,
++    )
++    assert r.status_code == 200, r.text
++    # complete
++    r = client.post(
++        f"{BASE_URL}/api/task-templates/{tid}/attachments/complete",
++        json={"upload_id": upload_id}, timeout=20,
++    )
++    assert r.status_code == 200, r.text
++    # list template attachments
++    r = client.get(f"{BASE_URL}/api/task-templates/{tid}/attachments", timeout=10)
++    assert r.status_code == 200 and len(r.json()) == 1
++    # instantiate → task should get a copy
++    r = client.post(f"{BASE_URL}/api/task-templates/{tid}/instantiate", json={}, timeout=20)
++    assert r.status_code == 200, r.text
++    task = r.json()
++    _TASK_IDS.append(task["id"])
++    r = client.get(f"{BASE_URL}/api/tasks/{task['id']}/attachments", timeout=10)
++    assert r.status_code == 200
++    atts = r.json()
++    assert len(atts) == 1 and atts[0]["original_filename"] == "not.txt"
++
++
++def test_delete_template(client):
++    tpl = _create_tpl(client, name="Silinecek")
++    r = client.delete(f"{BASE_URL}/api/task-templates/{tpl['id']}", timeout=10)
++    assert r.status_code == 200 and r.json().get("deleted") == 1
++    _TPL_IDS.remove(tpl["id"])
++    r = client.get(f"{BASE_URL}/api/task-templates/{tpl['id']}", timeout=10)
++    assert r.status_code == 404
+diff --git a/frontend/src/components/KolayInterface.jsx b/frontend/src/components/KolayInterface.jsx
+index 42f53cb..90a9c27 100644
+--- a/frontend/src/components/KolayInterface.jsx
++++ b/frontend/src/components/KolayInterface.jsx
+@@ -42,6 +42,7 @@ import {
+   Archive,
+   Tag,
+   RotateCcw,
++  ClipboardPaste,
+ } from "lucide-react";
+ import { toast } from "sonner";
+ import { tasksApi, taskCategoriesApi, taskLockApi, notesApi, teamApi, reminderConfigApi, taskAttachmentsApi } from "../lib/api";
+@@ -65,6 +66,11 @@ import { LockConfigModal } from "./tasks/LockConfigModal";
+ import { UnlockOtpModal } from "./tasks/UnlockOtpModal";
+ import { OtpDisplayModal } from "./tasks/OtpDisplayModal";
+ import { LinkTasksModal } from "./tasks/LinkTasksModal";
++import { CopyTaskModal } from "./tasks/CopyTaskModal";
++import { TaskPasteMenu } from "./tasks/TaskPasteMenu";
++import { TemplateBar } from "./tasks/TemplateBar";
++import { TemplatesModal } from "./tasks/TemplatesModal";
++import { useTaskClipboard, clearTaskClipboard } from "../lib/taskClipboard";
+ import { printTasks, exportTasksExcel, exportTasksWord } from "../lib/taskExport";
+ 
+ // Son tarih + duruma göre basit durum rozeti (Sertex'te ayrı "öncelik" alanı yok).
+@@ -676,6 +682,13 @@ const KolayInterface = ({ onOpenSettings, sidebarOpen, isMobile }) => {
+   // ⋮ menü + modallar
+   const [ctxMenu, setCtxMenu] = useState(null); // { task, x, y }
+   const [editing, setEditing] = useState(null);
++  // Görev Kopyalama (Kopyala → Yapıştır) — Detaylı ile aynı pano.
++  const [copyModalTask, setCopyModalTask] = useState(null);
++  const [pasteMenu, setPasteMenu] = useState(null); // { x, y, categoryId, categoryName }
++  const clipboard = useTaskClipboard();
++  // Görev Şablonları.
++  const [templatesOpen, setTemplatesOpen] = useState(false);
++  const [templatesRefresh, setTemplatesRefresh] = useState(0);
+   const [sharing, setSharing] = useState(null);
+   const [reassigning, setReassigning] = useState(null);
+   const [lockConfig, setLockConfig] = useState(null);
+@@ -788,6 +801,23 @@ const KolayInterface = ({ onOpenSettings, sidebarOpen, isMobile }) => {
+       toast.success(`Görev → ${name}`); load();
+     } catch (e) { toast.error(e?.response?.data?.detail || "Değiştirilemedi"); }
+   };
++  // Görev Kopyalama — panodaki görevi hedef iş koluna çoğalt (Detaylı ile aynı).
++  const handlePaste = async (categoryId, categoryName) => {
++    if (!clipboard?.sourceId) return;
++    try {
++      await tasksApi.duplicate(clipboard.sourceId, {
++        include_subtasks: !!clipboard.includeSubtasks,
++        include_attachments: !!clipboard.includeAttachments,
++        category_id: categoryId || null,
++      });
++      toast.success(`Yapıştırıldı → ${categoryName || "Kolsuz"}`); load();
++    } catch (e) { toast.error(e?.response?.data?.detail || "Yapıştırılamadı"); }
++  };
++  // Şablondan görev oluştur → Düzenle'de aç.
++  const handleUseTemplate = (task) => {
++    load();
++    if (task) setEditing(task);
++  };
+   const setTaskReminderDays = async (id, days) => {
+     try { await tasksApi.update(id, { reminder_days: days == null ? 0 : days, reminder_disabled: false }); toast.success(days == null ? "Uyarı: varsayılan" : `Uyarı: ${days} gün önce`); load(); }
+     catch { toast.error("Değiştirilemedi"); }
+@@ -837,6 +867,7 @@ const KolayInterface = ({ onOpenSettings, sidebarOpen, isMobile }) => {
+   const handleAction = (task, action, extra) => {
+     if (action === "delete") removeTask(task.id, task.title);
+     else if (action === "edit") setEditing(task);
++    else if (action === "copy") setCopyModalTask(task);
+     else if (action === "share") setSharing(task);
+     else if (action === "archive") setArchived(task.id, true);
+     else if (action === "unarchive") setArchived(task.id, false);
+@@ -1073,6 +1104,31 @@ const KolayInterface = ({ onOpenSettings, sidebarOpen, isMobile }) => {
+                 </button>
+               </div>
+ 
++              <TemplateBar
++                refreshKey={templatesRefresh}
++                onUse={handleUseTemplate}
++                onManage={() => setTemplatesOpen(true)}
++              />
++              <div className="mb-3" />
++
++              {clipboard?.sourceId && (
++                <div
++                  data-testid="kolay-task-clipboard-bar"
++                  className="flex items-center gap-2 px-3 py-1.5 mb-3 rounded-lg border border-sertex-cyan/40 bg-sertex-cyan/5"
++                >
++                  <ClipboardPaste className="h-3.5 w-3.5 text-sertex-cyan shrink-0" />
++                  <span className="hud-text text-sertex-cyan truncate flex-1">Kopyalandı: {clipboard.title}</span>
++                  <span className="hud-text text-sertex-textMuted/70 text-[10px] hidden md:inline shrink-0">iş koluna sağ tıkla → Yapıştır</span>
++                  <button
++                    onClick={() => clearTaskClipboard()}
++                    data-testid="kolay-task-clipboard-clear"
++                    className="hud-text text-rose-300 hover:text-rose-200 flex items-center gap-1 shrink-0"
++                  >
++                    <X className="h-3 w-3" /> Panoyu Temizle
++                  </button>
++                </div>
++              )}
++
+               {flatCats.length > 0 && (
+                 <div className="flex items-center gap-2 mb-6 overflow-x-auto scrollbar-sertex pb-1" data-testid="kolay-cat-filter">
+                   {[{ id: "", name: "Tümü" }, ...flatCats, { id: "__none__", name: "Kolsuz" }].map((c) => {
+@@ -1082,6 +1138,16 @@ const KolayInterface = ({ onOpenSettings, sidebarOpen, isMobile }) => {
+                         key={c.id || "all"}
+                         type="button"
+                         onClick={() => setCatFilter(c.id)}
++                        onContextMenu={(e) => {
++                          if (!clipboard?.sourceId || c.id === "") return; // "Tümü" hedef değil
++                          e.preventDefault();
++                          setPasteMenu({
++                            x: e.clientX,
++                            y: e.clientY,
++                            categoryId: c.id === "__none__" ? null : c.id,
++                            categoryName: c.name,
++                          });
++                        }}
+                         data-testid={`kolay-cat-chip-${c.id || "all"}`}
+                         style={{ flexShrink: 0 }}
+                         className={`px-3 py-1.5 rounded-full border text-xs font-mono transition-colors whitespace-nowrap ${
+@@ -1189,6 +1255,29 @@ const KolayInterface = ({ onOpenSettings, sidebarOpen, isMobile }) => {
+       {editing && (
+         <EditTaskModal task={editing} onClose={() => setEditing(null)} onSave={saveEdit} isTeamView={false} categories={cats} teamMembers={[]} currentUser={user} />
+       )}
++      {/* Görev Kopyalama — Kopyala penceresi + iş koluna Yapıştır menüsü */}
++      {copyModalTask && (
++        <CopyTaskModal task={copyModalTask} onClose={() => setCopyModalTask(null)} />
++      )}
++      {pasteMenu && clipboard?.sourceId && (
++        <TaskPasteMenu
++          x={pasteMenu.x}
++          y={pasteMenu.y}
++          title={clipboard.title}
++          targetName={pasteMenu.categoryName || "Kolsuz"}
++          onPaste={() => handlePaste(pasteMenu.categoryId, pasteMenu.categoryName)}
++          onClear={() => clearTaskClipboard()}
++          onClose={() => setPasteMenu(null)}
++        />
++      )}
++      {templatesOpen && (
++        <TemplatesModal
++          categories={cats}
++          currentUser={user}
++          onUse={handleUseTemplate}
++          onClose={() => { setTemplatesOpen(false); setTemplatesRefresh((x) => x + 1); }}
++        />
++      )}
+       {sharing && (
+         <ShareTaskModal task={sharing} onClose={() => setSharing(null)} onSaved={() => { setSharing(null); load(); }} />
+       )}
+diff --git a/frontend/src/components/TaskCard.jsx b/frontend/src/components/TaskCard.jsx
+index 7c67998..c36393c 100644
+--- a/frontend/src/components/TaskCard.jsx
++++ b/frontend/src/components/TaskCard.jsx
+@@ -44,7 +44,7 @@ const taskDurationLabel = (start, end) => {
+ };
+ 
+ 
+-export const TaskCard = ({ task, displayNumber, onStatusChange, onDelete, onEdit, onSetReminder, onClearReminder, onSetSubtasks, onSetArchived, onReassign, onTransferCompany, onPromoteSubtask, onDemoteToSubtask, onDemoteChild, onPinNumber, onUnpinNumber, promotedChildren = [], dragControls, isTeamView, isHighlighted, categoryName, categories, onSetCategory, reminderConfig, onSetReminderDays, onSetReminderDisabled, currentUser, onLockChanged, collapsed = false, onToggleCollapse, detached = false, onToggleDetach, onNudge, nudgeCount = 0, onLinkTasks, onEditGroup, onRemoveFromGroup, onToggleDigestMute, highlight = "", archiveGroup = null, canPermanentDelete = false, onCancel, onUncancel, onRestore, onPermanentDelete, archiveSettings = null }) => {
++export const TaskCard = ({ task, displayNumber, onStatusChange, onDelete, onEdit, onCopy, onSetReminder, onClearReminder, onSetSubtasks, onSetArchived, onReassign, onTransferCompany, onPromoteSubtask, onDemoteToSubtask, onDemoteChild, onPinNumber, onUnpinNumber, promotedChildren = [], dragControls, isTeamView, isHighlighted, categoryName, categories, onSetCategory, reminderConfig, onSetReminderDays, onSetReminderDisabled, currentUser, onLockChanged, collapsed = false, onToggleCollapse, detached = false, onToggleDetach, onNudge, nudgeCount = 0, onLinkTasks, onEditGroup, onRemoveFromGroup, onToggleDigestMute, highlight = "", archiveGroup = null, canPermanentDelete = false, onCancel, onUncancel, onRestore, onPermanentDelete, archiveSettings = null }) => {
+   const layer = dueSoonLayer(task, reminderConfig);
+   const style = statusStyle(task, layer);
+   const overdue = isOverdue(task);
+@@ -297,6 +297,7 @@ export const TaskCard = ({ task, displayNumber, onStatusChange, onDelete, onEdit
+   const handleAction = (action, extra) => {
+     if (action === "delete") onDelete();
+     else if (action === "edit") onEdit();
++    else if (action === "copy") onCopy?.();
+     else if (action === "share") setShowShare(true);
+     else if (action === "archive") onSetArchived(true);
+     else if (action === "unarchive") onSetArchived(false);
+diff --git a/frontend/src/components/TaskContextMenu.jsx b/frontend/src/components/TaskContextMenu.jsx
+index 3cd66ab..479e70f 100644
+--- a/frontend/src/components/TaskContextMenu.jsx
++++ b/frontend/src/components/TaskContextMenu.jsx
+@@ -5,7 +5,7 @@ import {
+   Check, Pause, Play, Trash2, Clock, AlertTriangle, Edit3, Bell,
+   ChevronRight, BellOff, GripVertical, Archive, ArchiveRestore, UserPlus,
+   Tag, Lock, Unlock, KeyRound, Share2, RefreshCw, Printer, FileSpreadsheet,
+-  FileText, FileDown, Link2, Unlink, RotateCcw, CornerLeftUp, Anchor, Ban,
++  FileText, FileDown, Link2, Unlink, RotateCcw, CornerLeftUp, Anchor, Ban, Copy,
+ } from "lucide-react";
+ import { LOCK_KEY_LABELS } from "../lib/taskLocks";
+ import { toast } from "sonner";
+@@ -122,6 +122,14 @@ export const ContextMenu = ({ x, y, task, onAction, onClose, isTeamView, onReass
+       color: "text-sertex-cyan hover:bg-sertex-cyan/10",
+       action: "edit",
+     },
++    // Görev Kopyalama — görevi panoya al; bir iş koluna sağ tıklayıp "Yapıştır"
++    // ile o iş kolunda yeni (bana atanan) kopya oluştur. Hazır şablon mantığı.
++    {
++      icon: Copy,
++      label: "Kopyala",
++      color: "text-sertex-cyan hover:bg-sertex-cyan/10",
++      action: "copy",
++    },
+     // Sıra numarasını sabitle — sürüklense de numara değişmez (⚓).
+     {
+       icon: Anchor,
+diff --git a/frontend/src/components/TasksPanel.jsx b/frontend/src/components/TasksPanel.jsx
+index f917ac6..1db901e 100644
+--- a/frontend/src/components/TasksPanel.jsx
++++ b/frontend/src/components/TasksPanel.jsx
+@@ -22,6 +22,7 @@ import {
+   ExternalLink,
+   Search,
+   Trash2,
++  ClipboardPaste,
+ } from "lucide-react";
+ import { tasksApi, teamApi, taskCategoriesApi, reminderConfigApi, taskAttachmentsApi } from "../lib/api";
+ import { openDetachedPanel } from "../lib/detachedPanels";
+@@ -61,6 +62,11 @@ import { showReminderToast } from "../lib/reminderToast";
+ import { confirmDialog, promptDialog } from "../lib/confirm";
+ import { printTasks, exportTasksExcel, exportTasksWord } from "../lib/taskExport";
+ import ExportSelectModal from "./ExportSelectModal";
++import { CopyTaskModal } from "./tasks/CopyTaskModal";
++import { TaskPasteMenu } from "./tasks/TaskPasteMenu";
++import { TemplateBar } from "./tasks/TemplateBar";
++import { TemplatesModal } from "./tasks/TemplatesModal";
++import { useTaskClipboard, clearTaskClipboard } from "../lib/taskClipboard";
+ 
+ // Faz 9 CP6 — TasksPanel bileşenleri ayrı dosyalara taşındı (davranış birebir aynı).
+ import { TaskCard } from "./TaskCard";
+@@ -285,6 +291,13 @@ const TasksPanel = ({ refreshSignal, onDataChanged, detached = false, initialCat
+   const [dragOverCatId, setDragOverCatId] = useState(null);
+   // Görev → İş Kolu sürükle-bırakta imlecin o an üstünde olduğu çip.
+   const [taskDragOverCatId, setTaskDragOverCatId] = useState(null);
++  // Görev Kopyalama (Kopyala → Yapıştır).
++  const [copyModalTask, setCopyModalTask] = useState(null);
++  const [pasteMenu, setPasteMenu] = useState(null); // { x, y, categoryId, categoryName }
++  const clipboard = useTaskClipboard();
++  // Görev Şablonları (Şablon Kütüphanesi).
++  const [templatesOpen, setTemplatesOpen] = useState(false);
++  const [templatesRefresh, setTemplatesRefresh] = useState(0);
+   const orderedCategories = useMemo(() => {
+     if (!catOrder.length) return categories;
+     const pos = new Map(catOrder.map((id, i) => [id, i]));
+@@ -1098,6 +1111,31 @@ const TasksPanel = ({ refreshSignal, onDataChanged, detached = false, initialCat
+     }
+   };
+ 
++  // Görev Kopyalama — panodaki görevi hedef iş koluna (categoryId; null =
++  // KOLSUZ) çoğalt. Pano temizlenene kadar durur → çok kez yapıştırılabilir.
++  const handlePaste = async (categoryId, categoryName) => {
++    if (!clipboard?.sourceId) return;
++    try {
++      await tasksApi.duplicate(clipboard.sourceId, {
++        include_subtasks: !!clipboard.includeSubtasks,
++        include_attachments: !!clipboard.includeAttachments,
++        category_id: categoryId || null,
++      });
++      toast.success(`Yapıştırıldı → ${categoryName || "Kolsuz"}`);
++      load();
++      onDataChanged?.();
++    } catch (e) {
++      toast.error(e?.response?.data?.detail || "Yapıştırılamadı");
++    }
++  };
++
++  // Şablondan görev oluştur (instantiate) → oluşan görevi Düzenle'de aç.
++  const handleUseTemplate = (task) => {
++    load();
++    onDataChanged?.();
++    if (task) setEditing(task);
++  };
++
+   // Faz 8 CP5 — task-level due-soon overrides via context menu.
+   const setTaskReminderDays = async (id, days) => {
+     try {
+@@ -1376,6 +1414,7 @@ const TasksPanel = ({ refreshSignal, onDataChanged, detached = false, initialCat
+     onStatusChange: (status) => setStatus(t.id, status),
+     onDelete: () => removeTask(t.id),
+     onEdit: () => setEditing(t),
++    onCopy: () => setCopyModalTask(t),
+     onSetReminder: (iso, opts) => setReminder(t.id, iso, opts),
+     onClearReminder: () => clearReminder(t.id),
+     onSetSubtasks: (subs) => setSubtasks(t.id, subs),
+@@ -1752,6 +1791,11 @@ const TasksPanel = ({ refreshSignal, onDataChanged, detached = false, initialCat
+           onDragOver={(e) => { e.preventDefault(); if (dragOverCatId !== node.id) setDragOverCatId(node.id); }}
+           onDrop={(e) => { e.preventDefault(); handleCatDrop(node.id); }}
+           onDragEnd={() => { setDragCatId(null); setDragOverCatId(null); }}
++          onContextMenu={(e) => {
++            if (!clipboard?.sourceId) return; // pano boşsa tarayıcı menüsü açılsın
++            e.preventDefault();
++            setPasteMenu({ x: e.clientX, y: e.clientY, categoryId: node.id, categoryName: node.name });
++          }}
+           data-testid={`category-node-${node.name}`}
+           style={{ marginLeft: depth * 14 }}
+           title="Sürükleyerek aynı seviyede sırala · görevi buraya bırakınca bu iş koluna taşınır"
+@@ -2135,6 +2179,38 @@ const TasksPanel = ({ refreshSignal, onDataChanged, detached = false, initialCat
+         </div>
+       )}
+ 
++      {/* Şablondan Başla çubuğu + Şablon Kütüphanesi girişi */}
++      {!showArchived && (
++        <TemplateBar
++          refreshKey={templatesRefresh}
++          onUse={handleUseTemplate}
++          onManage={() => setTemplatesOpen(true)}
++        />
++      )}
++
++      {/* Görev Kopyalama panosu — dolu iken göster (iş koluna sağ tık → Yapıştır) */}
++      {clipboard?.sourceId && !showArchived && (
++        <div
++          data-testid="task-clipboard-bar"
++          className="flex items-center gap-2 px-3 py-1.5 rounded-md border border-sertex-cyan/40 bg-sertex-cyan/5"
++        >
++          <ClipboardPaste className="h-3.5 w-3.5 text-sertex-cyan shrink-0" />
++          <span className="hud-text text-sertex-cyan truncate flex-1">
++            Kopyalandı: {clipboard.title}
++          </span>
++          <span className="hud-text text-sertex-textMuted/70 text-[10px] hidden md:inline shrink-0">
++            iş koluna sağ tıkla → Yapıştır
++          </span>
++          <button
++            onClick={() => clearTaskClipboard()}
++            data-testid="task-clipboard-clear"
++            className="hud-text text-rose-300 hover:text-rose-200 flex items-center gap-1 shrink-0"
++          >
++            <X className="h-3 w-3" /> Panoyu Temizle
++          </button>
++        </div>
++      )}
++
+       {/* İş Kolu FİLTRE ağacı — tıklanabilir, açılır-kapanır liste (ana kol → alt kol) */}
+       {categories.length > 0 && !showArchived && (
+         <div className="flex flex-col gap-1" data-testid="category-filter-bar">
+@@ -2163,6 +2239,11 @@ const TasksPanel = ({ refreshSignal, onDataChanged, detached = false, initialCat
+           {catForest.map((node) => renderFilterNode(node, 0))}
+           <button
+             onClick={() => setCategoryFilter("__none__")}
++            onContextMenu={(e) => {
++              if (!clipboard?.sourceId) return;
++              e.preventDefault();
++              setPasteMenu({ x: e.clientX, y: e.clientY, categoryId: null, categoryName: "Kolsuz" });
++            }}
+             data-testid="category-chip-none"
+             data-cat-drop="__none__"
+             title="Görevi buraya bırakınca iş kolundan çıkarılır"
+@@ -2737,6 +2818,29 @@ const TasksPanel = ({ refreshSignal, onDataChanged, detached = false, initialCat
+           currentUser={user}
+         />
+       )}
++      {/* Görev Kopyalama — Kopyala penceresi + iş koluna Yapıştır menüsü */}
++      {copyModalTask && (
++        <CopyTaskModal task={copyModalTask} onClose={() => setCopyModalTask(null)} />
++      )}
++      {pasteMenu && clipboard?.sourceId && (
++        <TaskPasteMenu
++          x={pasteMenu.x}
++          y={pasteMenu.y}
++          title={clipboard.title}
++          targetName={pasteMenu.categoryName || "Kolsuz"}
++          onPaste={() => handlePaste(pasteMenu.categoryId, pasteMenu.categoryName)}
++          onClear={() => clearTaskClipboard()}
++          onClose={() => setPasteMenu(null)}
++        />
++      )}
++      {templatesOpen && (
++        <TemplatesModal
++          categories={categories}
++          currentUser={user}
++          onUse={handleUseTemplate}
++          onClose={() => { setTemplatesOpen(false); setTemplatesRefresh((x) => x + 1); }}
++        />
++      )}
+       {/* GÖREV BAĞLAMA — görevleri bağla / grubu düzenle modalı */}
+       {linkModal && (
+         <LinkTasksModal
+diff --git a/frontend/src/components/tasks/CopyTaskModal.jsx b/frontend/src/components/tasks/CopyTaskModal.jsx
+new file mode 100644
+index 0000000..7f5ef93
+--- /dev/null
++++ b/frontend/src/components/tasks/CopyTaskModal.jsx
+@@ -0,0 +1,132 @@
++import { useEffect, useState } from "react";
++import { createPortal } from "react-dom";
++import { motion } from "framer-motion";
++import { Copy, X, Check } from "lucide-react";
++import { toast } from "sonner";
++import { taskAttachmentsApi } from "../../lib/api";
++import { setTaskClipboard } from "../../lib/taskClipboard";
++
++// Görev Kopyalama penceresi — sağ tık → "Kopyala" ile açılır. Alt görev ve
++// dosya eklerinin de kopyalanıp kopyalanmayacağı seçilir (görevde yoksa o
++// seçenek gizli). Onayla → görev panoya alınır; kullanıcı bir iş koluna sağ
++// tıklayıp "Yapıştır" der.
++export const CopyTaskModal = ({ task, onClose }) => {
++  const subtaskCount = (task?.subtasks || []).length;
++  const [attCount, setAttCount] = useState(null); // null = yükleniyor
++  const [includeSubtasks, setIncludeSubtasks] = useState(true);
++  const [includeAttachments, setIncludeAttachments] = useState(true);
++
++  useEffect(() => {
++    let alive = true;
++    (async () => {
++      try {
++        const rows = await taskAttachmentsApi.list(task.id);
++        if (alive) setAttCount(Array.isArray(rows) ? rows.length : 0);
++      } catch {
++        if (alive) setAttCount(0);
++      }
++    })();
++    return () => {
++      alive = false;
++    };
++  }, [task?.id]);
++
++  const confirm = () => {
++    setTaskClipboard({
++      sourceId: task.id,
++      title: task.title,
++      includeSubtasks: subtaskCount > 0 ? includeSubtasks : false,
++      includeAttachments: attCount > 0 ? includeAttachments : false,
++    });
++    toast.success("Görev panoya kopyalandı — bir iş koluna sağ tıklayıp Yapıştır'ı seçin.");
++    onClose();
++  };
++
++  const Row = ({ checked, onToggle, label, testid }) => (
++    <button
++      type="button"
++      onClick={onToggle}
++      data-testid={testid}
++      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-md border border-sertex-cyan/25 hover:border-sertex-cyan/60 hover:bg-sertex-cyan/5 transition-colors text-left"
++    >
++      <span
++        className={`h-5 w-5 rounded border flex items-center justify-center shrink-0 ${
++          checked ? "bg-sertex-cyan/20 border-sertex-cyan" : "border-sertex-textMuted/40"
++        }`}
++      >
++        {checked && <Check className="h-3.5 w-3.5 text-sertex-cyan" />}
++      </span>
++      <span className="hud-text text-sertex-text">{label}</span>
++    </button>
++  );
++
++  return createPortal(
++    <div
++      className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
++      onClick={onClose}
++      data-testid="copy-task-modal"
++    >
++      <motion.div
++        initial={{ opacity: 0, scale: 0.96 }}
++        animate={{ opacity: 1, scale: 1 }}
++        transition={{ duration: 0.15 }}
++        onClick={(e) => e.stopPropagation()}
++        className="glass-panel border border-sertex-cyan/40 rounded-lg w-full max-w-sm p-5 shadow-xl"
++      >
++        <div className="flex items-center justify-between mb-1">
++          <div className="flex items-center gap-2 text-sertex-cyan">
++            <Copy className="h-4 w-4" />
++            <h3 className="hud-text text-sm font-semibold">GÖREVİ KOPYALA</h3>
++          </div>
++          <button onClick={onClose} data-testid="copy-task-close" className="text-sertex-textMuted hover:text-sertex-cyan">
++            <X className="h-4 w-4" />
++          </button>
++        </div>
++        <p className="hud-text text-sertex-textMuted mb-4 truncate">"{task?.title}"</p>
++
++        <div className="space-y-2">
++          {subtaskCount > 0 && (
++            <Row
++              checked={includeSubtasks}
++              onToggle={() => setIncludeSubtasks((v) => !v)}
++              label={`Alt görevleri dahil et (${subtaskCount})`}
++              testid="copy-include-subtasks"
++            />
++          )}
++          {attCount > 0 && (
++            <Row
++              checked={includeAttachments}
++              onToggle={() => setIncludeAttachments((v) => !v)}
++              label={`Dosya eklerini dahil et (${attCount})`}
++              testid="copy-include-attachments"
++            />
++          )}
++          {subtaskCount === 0 && attCount === 0 && (
++            <p className="hud-text text-sertex-textMuted/80 px-1 py-2">
++              Görevin kendisi kopyalanacak (alt görev / dosya eki yok).
++            </p>
++          )}
++        </div>
++
++        <div className="flex gap-2 mt-5">
++          <button
++            onClick={onClose}
++            data-testid="copy-task-cancel"
++            className="flex-1 py-2 rounded-md border border-sertex-textMuted/30 text-sertex-textMuted hover:text-sertex-text hover:border-sertex-textMuted/60 hud-text transition-colors"
++          >
++            VAZGEÇ
++          </button>
++          <button
++            onClick={confirm}
++            disabled={attCount === null}
++            data-testid="copy-task-confirm"
++            className="flex-1 py-2 rounded-md bg-sertex-cyan/15 border border-sertex-cyan text-sertex-cyan hover:bg-sertex-cyan/25 hud-text transition-colors disabled:opacity-40"
++          >
++            KOPYALA
++          </button>
++        </div>
++      </motion.div>
++    </div>,
++    document.body,
++  );
++};
+diff --git a/frontend/src/components/tasks/TaskAttachments.jsx b/frontend/src/components/tasks/TaskAttachments.jsx
+index 557b041..786488a 100644
+--- a/frontend/src/components/tasks/TaskAttachments.jsx
++++ b/frontend/src/components/tasks/TaskAttachments.jsx
+@@ -13,7 +13,7 @@ const fmtSize = (b) => {
+ 
+ // Görev kartına / Düzenle penceresine gömülen "📎 Dosyalar" bölümü.
+ // Yükle (parçalı) + listele + tıkla-indir + sil. Kendi verisini yükler.
+-export const TaskAttachments = ({ taskId, currentUserId, canManage = false, compact = false }) => {
++export const TaskAttachments = ({ taskId, currentUserId, canManage = false, compact = false, attachmentApi = taskAttachmentsApi }) => {
+   const [items, setItems] = useState(null); // null=loading
+   const [uploading, setUploading] = useState(null); // {name, pct}
+   const [downloadingId, setDownloadingId] = useState(null);
+@@ -21,7 +21,7 @@ export const TaskAttachments = ({ taskId, currentUserId, canManage = false, comp
+   const inputRef = useRef(null);
+ 
+   const load = useCallback(() => {
+-    taskAttachmentsApi.list(taskId)
++    attachmentApi.list(taskId)
+       .then((r) => setItems(r || []))
+       .catch(() => setItems([]));
+   }, [taskId]);
+@@ -38,7 +38,7 @@ export const TaskAttachments = ({ taskId, currentUserId, canManage = false, comp
+       }
+       setUploading({ name: f.name, pct: 0 });
+       try {
+-        await taskAttachmentsApi.upload(taskId, f, (pct) =>
++        await attachmentApi.upload(taskId, f, (pct) =>
+           setUploading({ name: f.name, pct }),
+         );
+         toast.success(`Dosya eklendi: ${f.name}`);
+@@ -54,7 +54,7 @@ export const TaskAttachments = ({ taskId, currentUserId, canManage = false, comp
+   const handleDownload = async (att) => {
+     setDownloadingId(att.id);
+     try {
+-      const res = await taskAttachmentsApi.download(taskId, att.id);
++      const res = await attachmentApi.download(taskId, att.id);
+       const url = URL.createObjectURL(res.data);
+       const a = document.createElement("a");
+       a.href = url;
+@@ -83,7 +83,7 @@ export const TaskAttachments = ({ taskId, currentUserId, canManage = false, comp
+     if (!kind) return handleDownload(att); // önizlenemeyen tür → indir
+     setDownloadingId(att.id);
+     try {
+-      const res = await taskAttachmentsApi.download(taskId, att.id);
++      const res = await attachmentApi.download(taskId, att.id);
+       const url = URL.createObjectURL(res.data);
+       setPreview({ att, url, kind });
+     } catch (e) {
+@@ -102,7 +102,7 @@ export const TaskAttachments = ({ taskId, currentUserId, canManage = false, comp
+ 
+   const handleDelete = async (att) => {
+     try {
+-      await taskAttachmentsApi.remove(taskId, att.id);
++      await attachmentApi.remove(taskId, att.id);
+       setItems((prev) => (prev || []).filter((x) => x.id !== att.id));
+       toast.success("Dosya silindi");
+     } catch (e) {
+diff --git a/frontend/src/components/tasks/TaskPasteMenu.jsx b/frontend/src/components/tasks/TaskPasteMenu.jsx
+new file mode 100644
+index 0000000..5ba4386
+--- /dev/null
++++ b/frontend/src/components/tasks/TaskPasteMenu.jsx
+@@ -0,0 +1,74 @@
++import { useEffect, useLayoutEffect, useRef, useState } from "react";
++import { createPortal } from "react-dom";
++import { motion } from "framer-motion";
++import { ClipboardPaste, Trash2 } from "lucide-react";
++
++// İş koluna sağ tık → "Yapıştır" küçük menüsü. Pano dolu iken açılır; kopyalanan
++// görevi bu iş koluna (categoryId; null = KOLSUZ) çoğaltır. "Panoyu Temizle"
++// ile pano boşaltılır.
++export const TaskPasteMenu = ({ x, y, title, targetName, onPaste, onClear, onClose }) => {
++  const ref = useRef();
++  const [pos, setPos] = useState({ left: x, top: y, ready: false });
++
++  useEffect(() => {
++    const onDown = (e) => {
++      if (ref.current && !ref.current.contains(e.target)) onClose();
++    };
++    const onKey = (e) => e.key === "Escape" && onClose();
++    document.addEventListener("mousedown", onDown);
++    document.addEventListener("keydown", onKey);
++    return () => {
++      document.removeEventListener("mousedown", onDown);
++      document.removeEventListener("keydown", onKey);
++    };
++  }, [onClose]);
++
++  useLayoutEffect(() => {
++    if (!ref.current) return;
++    const rect = ref.current.getBoundingClientRect();
++    const pad = 8;
++    let left = x;
++    let top = y;
++    if (left + rect.width > window.innerWidth - pad) left = window.innerWidth - rect.width - pad;
++    if (top + rect.height > window.innerHeight - pad) top = window.innerHeight - rect.height - pad;
++    if (left < pad) left = pad;
++    if (top < pad) top = pad;
++    setPos({ left, top, ready: true });
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, [x, y]);
++
++  return createPortal(
++    <motion.div
++      ref={ref}
++      initial={{ opacity: 0 }}
++      animate={{ opacity: 1 }}
++      transition={{ duration: 0.12 }}
++      style={{ left: pos.left, top: pos.top, visibility: pos.ready ? "visible" : "hidden" }}
++      className="fixed z-[110] glass-panel border border-sertex-cyan/40 rounded-md py-1 shadow-lg min-w-[220px]"
++      data-testid="task-paste-menu"
++    >
++      <div className="px-3 py-1.5 border-b border-sertex-cyan/20">
++        <div className="hud-text text-sertex-textMuted/80 text-[10px]">YAPIŞTIRILACAK</div>
++        <div className="hud-text text-sertex-cyan truncate">{title}</div>
++        <div className="hud-text text-sertex-textMuted/70 text-[10px] mt-0.5 truncate">→ {targetName}</div>
++      </div>
++      <button
++        onClick={() => { onPaste(); onClose(); }}
++        data-testid="task-paste-confirm"
++        className="w-full text-left px-3 py-2 hud-text flex items-center gap-2 text-sertex-cyan hover:bg-sertex-cyan/10 transition-colors"
++      >
++        <ClipboardPaste className="h-3.5 w-3.5 shrink-0" />
++        <span className="flex-1">Yapıştır</span>
++      </button>
++      <button
++        onClick={() => { onClear(); onClose(); }}
++        data-testid="task-paste-clear"
++        className="w-full text-left px-3 py-2 hud-text flex items-center gap-2 text-rose-300 hover:bg-rose-500/15 transition-colors border-t border-sertex-cyan/15"
++      >
++        <Trash2 className="h-3.5 w-3.5 shrink-0" />
++        <span className="flex-1">Panoyu Temizle</span>
++      </button>
++    </motion.div>,
++    document.body,
++  );
++};
+diff --git a/frontend/src/components/tasks/TemplateBar.jsx b/frontend/src/components/tasks/TemplateBar.jsx
+new file mode 100644
+index 0000000..48fe86f
+--- /dev/null
++++ b/frontend/src/components/tasks/TemplateBar.jsx
+@@ -0,0 +1,73 @@
++import React, { useEffect, useState } from "react";
++import { LayoutTemplate, Plus, Loader2 } from "lucide-react";
++import { toast } from "sonner";
++import { templatesApi } from "../../lib/api";
++
++// "Şablondan Başla" çubuğu — Yeni Görev alanının yanında. Şablonlar seçilebilir
++// çip olarak gelir; tıklanınca o şablondan görev oluşturulur (instantiate) ve
++// düzenleme penceresi açılır. "Şablonlar" düğmesi kütüphaneyi açar.
++export const TemplateBar = ({ refreshKey = 0, onUse, onManage }) => {
++  const [items, setItems] = useState([]);
++  const [loading, setLoading] = useState(true);
++  const [usingId, setUsingId] = useState(null);
++
++  useEffect(() => {
++    let alive = true;
++    setLoading(true);
++    templatesApi.list()
++      .then((r) => alive && setItems(Array.isArray(r) ? r : []))
++      .catch(() => alive && setItems([]))
++      .finally(() => alive && setLoading(false));
++    return () => { alive = false; };
++  }, [refreshKey]);
++
++  const use = async (t) => {
++    setUsingId(t.id);
++    try {
++      const task = await templatesApi.instantiate(t.id);
++      toast.success(`"${t.name}" şablonundan görev oluşturuldu — düzenleyin`);
++      onUse?.(task);
++    } catch (e) {
++      toast.error(e?.response?.data?.detail || "Oluşturulamadı");
++    } finally {
++      setUsingId(null);
++    }
++  };
++
++  return (
++    <div className="flex items-center gap-2 flex-wrap" data-testid="template-bar">
++      <span className="hud-text text-sertex-textMuted/80 shrink-0 flex items-center gap-1">
++        <LayoutTemplate className="h-3.5 w-3.5" /> ŞABLONDAN BAŞLA:
++      </span>
++      {loading ? (
++        <Loader2 className="h-3.5 w-3.5 text-sertex-cyan animate-spin" />
++      ) : (
++        items.slice(0, 8).map((t) => (
++          <button
++            key={t.id}
++            onClick={() => use(t)}
++            disabled={usingId === t.id}
++            data-testid={`template-chip-${t.id}`}
++            title={t.title || t.name}
++            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-sertex-cyan/30 text-sertex-cyan hover:bg-sertex-cyan/15 hover:border-sertex-cyan text-[11px] font-mono transition-colors disabled:opacity-40"
++          >
++            {usingId === t.id && <Loader2 className="h-3 w-3 animate-spin" />}
++            {t.name}
++          </button>
++        ))
++      )}
++      {!loading && items.length === 0 && (
++        <span className="hud-text text-sertex-textMuted/60">henüz şablon yok</span>
++      )}
++      <button
++        onClick={onManage}
++        data-testid="template-manage-btn"
++        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-sertex-textMuted/30 text-sertex-textMuted hover:text-sertex-cyan hover:border-sertex-cyan/50 text-[11px] font-mono transition-colors"
++      >
++        <Plus className="h-3 w-3" /> Şablonlar
++      </button>
++    </div>
++  );
++};
++
++export default TemplateBar;
+diff --git a/frontend/src/components/tasks/TemplateFormModal.jsx b/frontend/src/components/tasks/TemplateFormModal.jsx
+new file mode 100644
+index 0000000..a97a792
+--- /dev/null
++++ b/frontend/src/components/tasks/TemplateFormModal.jsx
+@@ -0,0 +1,209 @@
++import React, { useState } from "react";
++import { createPortal } from "react-dom";
++import { motion } from "framer-motion";
++import { LayoutTemplate, X, Plus, Trash2, User, Users } from "lucide-react";
++import { toast } from "sonner";
++import { templatesApi, templateAttachmentsApi } from "../../lib/api";
++import { REMINDER_DAY_CHOICES } from "../../lib/taskHelpers";
++import { getCategoryPathLabel } from "../../lib/categoryTree";
++import { TaskAttachments } from "./TaskAttachments";
++
++// Şablon oluştur / düzenle. Yeni şablonda "Kaydet" önce şablonu oluşturur,
++// ardından dosya ekleri bölümü açılır (ekler bir şablon id'si gerektirir).
++export const TemplateFormModal = ({ template, categories = [], currentUser = null, onClose, onSaved }) => {
++  const [tplId, setTplId] = useState(template?.id || null);
++  const [name, setName] = useState(template?.name || "");
++  const [title, setTitle] = useState(template?.title || "");
++  const [description, setDescription] = useState(template?.description || "");
++  const [categoryId, setCategoryId] = useState(template?.category_id || "");
++  const [reminderDays, setReminderDays] = useState(
++    template?.reminder_disabled ? "__off__" : (template?.reminder_days == null ? "" : String(template.reminder_days)),
++  );
++  const [scope, setScope] = useState(template?.scope === "shared" ? "shared" : "personal");
++  const [subtasks, setSubtasks] = useState(template?.subtasks || []);
++  const [newSub, setNewSub] = useState("");
++  const [saving, setSaving] = useState(false);
++
++  const addSub = () => {
++    const t = newSub.trim();
++    if (!t) return;
++    setSubtasks((prev) => [...prev, { id: `tmp-${Date.now()}`, text: t }]);
++    setNewSub("");
++  };
++
++  const buildBody = () => {
++    const body = {
++      name: name.trim(),
++      title: title.trim(),
++      description: description.trim(),
++      category_id: categoryId || null,
++      scope,
++      subtasks: subtasks.map((s) => ({ text: s.text })),
++    };
++    if (reminderDays === "__off__") {
++      body.reminder_disabled = true;
++      body.reminder_days = 0;
++    } else if (reminderDays === "") {
++      body.reminder_disabled = false;
++      body.reminder_days = null;
++    } else {
++      body.reminder_disabled = false;
++      body.reminder_days = parseInt(reminderDays, 10);
++    }
++    return body;
++  };
++
++  const handleSave = async () => {
++    if (name.trim().length < 2) {
++      toast.error("Şablon adı en az 2 karakter olmalı");
++      return;
++    }
++    setSaving(true);
++    try {
++      const body = buildBody();
++      if (tplId) {
++        await templatesApi.update(tplId, body);
++        toast.success("Şablon güncellendi");
++        onSaved?.();
++        onClose();
++      } else {
++        const created = await templatesApi.create(body);
++        setTplId(created.id);
++        toast.success("Şablon kaydedildi — artık dosya ekleyebilirsiniz");
++        onSaved?.();
++      }
++    } catch (e) {
++      toast.error(e?.response?.data?.detail || "Kaydedilemedi");
++    } finally {
++      setSaving(false);
++    }
++  };
++
++  return createPortal(
++    <>
++      <div className="fixed inset-0 z-[130] bg-sertex-bg/70 backdrop-blur-sm" onClick={onClose} />
++      <div className="fixed inset-0 z-[140] flex items-center justify-center pointer-events-none px-4">
++        <motion.div
++          initial={{ opacity: 0, scale: 0.95 }}
++          animate={{ opacity: 1, scale: 1 }}
++          className="pointer-events-auto w-full max-w-[460px] max-h-[88vh] overflow-y-auto glass-panel corner-bracket p-4 space-y-3"
++          data-testid="template-form-modal"
++        >
++          <div className="flex items-center justify-between border-b border-sertex-cyan/20 pb-2">
++            <div className="display-text text-sertex-cyan neon-glow tracking-[0.2em] flex items-center gap-2">
++              <LayoutTemplate className="h-4 w-4" /> {tplId ? "ŞABLONU DÜZENLE" : "YENİ ŞABLON"}
++            </div>
++            <button onClick={onClose} data-testid="template-form-close" className="p-1 hover:bg-sertex-cyan/10 rounded text-sertex-textMuted hover:text-sertex-cyan">
++              <X className="h-4 w-4" />
++            </button>
++          </div>
++
++          <div>
++            <div className="hud-text text-sertex-textMuted mb-1">ŞABLON ADI *</div>
++            <input value={name} onChange={(e) => setName(e.target.value)} autoFocus data-testid="template-name"
++              placeholder="Örn: Haftalık Rapor"
++              className="w-full bg-sertex-surface/60 border border-sertex-cyan/25 rounded-md px-2 py-1.5 text-sm font-mono text-sertex-text placeholder:text-sertex-textMuted focus:border-sertex-cyan outline-none" />
++          </div>
++
++          {/* Kapsam — Kişisel / Ekip ortak */}
++          <div>
++            <div className="hud-text text-sertex-textMuted mb-1">KAPSAM</div>
++            <div className="grid grid-cols-2 gap-2">
++              <button type="button" onClick={() => setScope("personal")} data-testid="template-scope-personal"
++                className={`flex items-center justify-center gap-1.5 py-1.5 rounded-md border hud-text transition-colors ${scope === "personal" ? "border-sertex-cyan text-sertex-cyan bg-sertex-cyan/10" : "border-sertex-textMuted/30 text-sertex-textMuted hover:border-sertex-cyan/50"}`}>
++                <User className="h-3.5 w-3.5" /> Kişisel
++              </button>
++              <button type="button" onClick={() => setScope("shared")} data-testid="template-scope-shared"
++                className={`flex items-center justify-center gap-1.5 py-1.5 rounded-md border hud-text transition-colors ${scope === "shared" ? "border-sertex-cyan text-sertex-cyan bg-sertex-cyan/10" : "border-sertex-textMuted/30 text-sertex-textMuted hover:border-sertex-cyan/50"}`}>
++                <Users className="h-3.5 w-3.5" /> Ekip (şirket)
++              </button>
++            </div>
++          </div>
++
++          <div>
++            <div className="hud-text text-sertex-textMuted mb-1">GÖREV BAŞLIĞI</div>
++            <input value={title} onChange={(e) => setTitle(e.target.value)} data-testid="template-title"
++              placeholder="Görev oluşturulunca gelecek başlık"
++              className="w-full bg-sertex-surface/60 border border-sertex-cyan/25 rounded-md px-2 py-1.5 text-sm font-mono text-sertex-text placeholder:text-sertex-textMuted focus:border-sertex-cyan outline-none" />
++          </div>
++
++          <div>
++            <div className="hud-text text-sertex-textMuted mb-1">AÇIKLAMA</div>
++            <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} data-testid="template-description"
++              className="w-full bg-sertex-surface/60 border border-sertex-cyan/25 rounded-md px-2 py-1.5 text-sm font-mono text-sertex-text placeholder:text-sertex-textMuted focus:border-sertex-cyan outline-none resize-none" />
++          </div>
++
++          {categories.length > 0 && (
++            <div>
++              <div className="hud-text text-sertex-textMuted mb-1">🏷️ İŞ KOLU</div>
++              <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)} data-testid="template-category"
++                className="w-full bg-sertex-surface/60 border border-sertex-cyan/25 rounded-md px-2 py-1.5 text-sm font-mono text-sertex-text focus:border-sertex-cyan outline-none">
++                <option value="">— İş kolu yok —</option>
++                {categories.map((c) => (
++                  <option key={c.id} value={c.id}>{getCategoryPathLabel(c.id, categories)}</option>
++                ))}
++              </select>
++            </div>
++          )}
++
++          <div>
++            <div className="hud-text text-sertex-textMuted mb-1">⏱ YAKLAŞAN UYARISI</div>
++            <select value={reminderDays} onChange={(e) => setReminderDays(e.target.value)} data-testid="template-reminder-days"
++              className="w-full bg-sertex-surface/60 border border-sertex-cyan/25 rounded-md px-2 py-1.5 text-sm font-mono text-sertex-text focus:border-sertex-cyan outline-none">
++              <option value="">Varsayılan (hiyerarşi)</option>
++              {REMINDER_DAY_CHOICES.map((d) => (<option key={d} value={d}>{d} gün önce</option>))}
++              <option value="__off__">🚫 Kapalı</option>
++            </select>
++          </div>
++
++          {/* Alt görevler */}
++          <div>
++            <div className="hud-text text-sertex-textMuted mb-1">ALT GÖREVLER</div>
++            <div className="space-y-1">
++              {subtasks.map((s, i) => (
++                <div key={s.id || i} data-testid={`template-subtask-${i}`} className="flex items-center gap-2 px-2 py-1 rounded border border-sertex-cyan/15 bg-sertex-surface/40">
++                  <span className="flex-1 text-[12px] font-mono text-sertex-text truncate">{s.text}</span>
++                  <button onClick={() => setSubtasks((prev) => prev.filter((_, idx) => idx !== i))} data-testid={`template-subtask-remove-${i}`} className="p-1 text-sertex-textMuted hover:text-rose-400">
++                    <Trash2 className="h-3.5 w-3.5" />
++                  </button>
++                </div>
++              ))}
++            </div>
++            <div className="flex gap-2 mt-1">
++              <input value={newSub} onChange={(e) => setNewSub(e.target.value)} onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addSub())}
++                data-testid="template-subtask-input" placeholder="Alt görev ekle…"
++                className="flex-1 bg-sertex-surface/60 border border-sertex-cyan/25 rounded-md px-2 py-1.5 text-sm font-mono text-sertex-text placeholder:text-sertex-textMuted focus:border-sertex-cyan outline-none" />
++              <button onClick={addSub} data-testid="template-subtask-add" className="px-2 rounded-md border border-sertex-cyan/30 text-sertex-cyan hover:bg-sertex-cyan/10">
++                <Plus className="h-4 w-4" />
++              </button>
++            </div>
++          </div>
++
++          {/* Dosya ekleri — yalnızca şablon kaydedildikten sonra */}
++          {tplId ? (
++            <div className="border-t border-sertex-cyan/15 pt-1">
++              <TaskAttachments taskId={tplId} currentUserId={currentUser?.id} canManage attachmentApi={templateAttachmentsApi} />
++            </div>
++          ) : (
++            <div className="hud-text text-sertex-textMuted/70 border-t border-sertex-cyan/15 pt-2">
++              📎 Dosya eklemek için önce şablonu kaydedin.
++            </div>
++          )}
++
++          <div className="flex gap-2 pt-2 border-t border-sertex-cyan/15">
++            <button onClick={onClose} className="flex-1 py-2 border border-sertex-cyan/25 text-sertex-textMuted hover:text-sertex-cyan hover:border-sertex-cyan/50 rounded-md hud-text transition-colors">
++              {tplId ? "KAPAT" : "İPTAL"}
++            </button>
++            <button onClick={handleSave} disabled={saving} data-testid="template-save"
++              className="flex-1 py-2 bg-sertex-cyan/20 border border-sertex-cyan text-sertex-cyan hover:bg-sertex-cyan hover:text-sertex-bg rounded-md hud-text transition-colors disabled:opacity-40">
++              {tplId ? "GÜNCELLE" : "KAYDET"}
++            </button>
++          </div>
++        </motion.div>
++      </div>
++    </>,
++    document.body,
++  );
++};
++
++export default TemplateFormModal;
+diff --git a/frontend/src/components/tasks/TemplatesModal.jsx b/frontend/src/components/tasks/TemplatesModal.jsx
+new file mode 100644
+index 0000000..916cba9
+--- /dev/null
++++ b/frontend/src/components/tasks/TemplatesModal.jsx
+@@ -0,0 +1,122 @@
++import React, { useEffect, useState } from "react";
++import { createPortal } from "react-dom";
++import { motion } from "framer-motion";
++import { LayoutTemplate, X, Plus, Edit3, Trash2, Play, User, Users, Paperclip } from "lucide-react";
++import { toast } from "sonner";
++import { templatesApi } from "../../lib/api";
++import { TemplateFormModal } from "./TemplateFormModal";
++
++// Şablon Kütüphanesi — listele + oluştur/düzenle/sil + "Kullan" (şablondan görev).
++export const TemplatesModal = ({ categories = [], currentUser = null, onClose, onUse }) => {
++  const [items, setItems] = useState(null); // null=loading
++  const [form, setForm] = useState(null); // {template} | {} (new)
++  const [usingId, setUsingId] = useState(null);
++
++  const load = () => {
++    templatesApi.list().then((r) => setItems(r || [])).catch(() => setItems([]));
++  };
++  useEffect(() => { load(); }, []);
++
++  const handleDelete = async (t) => {
++    try {
++      await templatesApi.remove(t.id);
++      setItems((prev) => (prev || []).filter((x) => x.id !== t.id));
++      toast.success("Şablon silindi");
++    } catch (e) {
++      toast.error(e?.response?.data?.detail || "Silinemedi");
++    }
++  };
++
++  const handleUse = async (t) => {
++    setUsingId(t.id);
++    try {
++      const task = await templatesApi.instantiate(t.id);
++      toast.success(`"${t.name}" şablonundan görev oluşturuldu — düzenleyin`);
++      onUse?.(task);
++      onClose();
++    } catch (e) {
++      toast.error(e?.response?.data?.detail || "Oluşturulamadı");
++    } finally {
++      setUsingId(null);
++    }
++  };
++
++  return createPortal(
++    <>
++      <div className="fixed inset-0 z-[120] bg-sertex-bg/70 backdrop-blur-sm" onClick={onClose} />
++      <div className="fixed inset-0 z-[125] flex items-center justify-center pointer-events-none px-4">
++        <motion.div
++          initial={{ opacity: 0, scale: 0.95 }}
++          animate={{ opacity: 1, scale: 1 }}
++          className="pointer-events-auto w-full max-w-[520px] max-h-[86vh] overflow-y-auto glass-panel corner-bracket p-4 space-y-3"
++          data-testid="templates-modal"
++        >
++          <div className="flex items-center justify-between border-b border-sertex-cyan/20 pb-2">
++            <div className="display-text text-sertex-cyan neon-glow tracking-[0.2em] flex items-center gap-2">
++              <LayoutTemplate className="h-4 w-4" /> ŞABLON KÜTÜPHANESİ
++            </div>
++            <button onClick={onClose} data-testid="templates-close" className="p-1 hover:bg-sertex-cyan/10 rounded text-sertex-textMuted hover:text-sertex-cyan">
++              <X className="h-4 w-4" />
++            </button>
++          </div>
++
++          <button onClick={() => setForm({})} data-testid="template-new-btn"
++            className="w-full flex items-center justify-center gap-2 py-2 rounded-md border border-sertex-cyan/40 text-sertex-cyan hover:bg-sertex-cyan/10 hud-text transition-colors">
++            <Plus className="h-4 w-4" /> YENİ ŞABLON
++          </button>
++
++          {items === null ? (
++            <div className="hud-text text-sertex-textMuted py-4 text-center">Yükleniyor…</div>
++          ) : items.length === 0 ? (
++            <div className="hud-text text-sertex-textMuted/70 py-6 text-center" data-testid="templates-empty">
++              Henüz şablon yok. "Yeni Şablon" ile sık kullandığın görevleri kaydet.
++            </div>
++          ) : (
++            <div className="space-y-2">
++              {items.map((t) => (
++                <div key={t.id} data-testid={`template-row-${t.id}`}
++                  className="flex items-center gap-2 px-3 py-2 rounded-md border border-sertex-cyan/15 hover:border-sertex-cyan/40 bg-sertex-surface/40 transition-colors">
++                  <div className="flex-1 min-w-0">
++                    <div className="text-[13px] font-mono text-sertex-text truncate flex items-center gap-1.5">
++                      {t.scope === "shared" ? <Users className="h-3 w-3 text-sertex-cyan/80 shrink-0" /> : <User className="h-3 w-3 text-sertex-textMuted shrink-0" />}
++                      {t.name}
++                    </div>
++                    <div className="hud-text text-sertex-textMuted/70 truncate">
++                      {t.title || "(başlık yok)"}
++                      {(t.subtasks?.length || 0) > 0 ? ` · ${t.subtasks.length} alt görev` : ""}
++                    </div>
++                  </div>
++                  <button onClick={() => handleUse(t)} disabled={usingId === t.id} data-testid={`template-use-${t.id}`} title="Bu şablondan görev oluştur"
++                    className="inline-flex items-center gap-1 px-2 py-1 rounded border border-sertex-cyan/40 text-sertex-cyan hover:bg-sertex-cyan/15 hud-text transition-colors disabled:opacity-40 shrink-0">
++                    <Play className="h-3 w-3" /> Kullan
++                  </button>
++                  <button onClick={() => setForm({ template: t })} data-testid={`template-edit-${t.id}`} title="Düzenle"
++                    className="p-1 text-sertex-textMuted hover:text-sertex-cyan transition-colors shrink-0">
++                    <Edit3 className="h-3.5 w-3.5" />
++                  </button>
++                  <button onClick={() => handleDelete(t)} data-testid={`template-delete-${t.id}`} title="Sil"
++                    className="p-1 text-sertex-textMuted hover:text-rose-400 transition-colors shrink-0">
++                    <Trash2 className="h-3.5 w-3.5" />
++                  </button>
++                </div>
++              ))}
++            </div>
++          )}
++        </motion.div>
++      </div>
++
++      {form && (
++        <TemplateFormModal
++          template={form.template}
++          categories={categories}
++          currentUser={currentUser}
++          onClose={() => setForm(null)}
++          onSaved={load}
++        />
++      )}
++    </>,
++    document.body,
++  );
++};
++
++export default TemplatesModal;
+diff --git a/frontend/src/lib/api.js b/frontend/src/lib/api.js
+index ca02848..0659659 100644
+--- a/frontend/src/lib/api.js
++++ b/frontend/src/lib/api.js
+@@ -112,6 +112,9 @@ export const tasksApi = {
+       ...(extras.reminder_repeat_total != null ? { reminder_repeat_total: extras.reminder_repeat_total } : {}),
+       ...(extras.reminder_repeat_left != null ? { reminder_repeat_left: extras.reminder_repeat_left } : {}),
+     }).then((r) => r.data),
++  // Görev Kopyalama (Kopyala → Yapıştır) — kaynağı çoğaltır, kopya bana atanır.
++  duplicate: (id, { include_subtasks = true, include_attachments = true, category_id = null } = {}) =>
++    api.post(`/tasks/${id}/duplicate`, { include_subtasks, include_attachments, category_id }).then((r) => r.data),
+   update: (id, patch) => api.patch(`/tasks/${id}`, patch).then((r) => r.data),
+   setStatus: (id, status) =>
+     api.patch(`/tasks/${id}`, { status }).then((r) => r.data),
+@@ -552,5 +555,52 @@ export const taskAttachmentsApi = {
+   },
+ };
+ 
++// Görev Şablonları (Task Templates) — sık görevleri şablonla, hızlı oluştur.
++export const templatesApi = {
++  list: () => api.get("/task-templates").then((r) => r.data),
++  get: (id) => api.get(`/task-templates/${id}`).then((r) => r.data),
++  create: (body) => api.post("/task-templates", body).then((r) => r.data),
++  update: (id, patch) => api.patch(`/task-templates/${id}`, patch).then((r) => r.data),
++  remove: (id) => api.delete(`/task-templates/${id}`).then((r) => r.data),
++  // Şablondan başlat — gerçek görev oluşturur (bana atanır), Task döner.
++  instantiate: (id, { category_id = null } = {}) =>
++    api.post(`/task-templates/${id}/instantiate`, { category_id }).then((r) => r.data),
++};
++
++// Şablon dosya ekleri — taskAttachmentsApi ile AYNI şekil (TaskAttachments
++// bileşeni `attachmentApi` prop'u ile bunu kullanır).
++export const templateAttachmentsApi = {
++  list: (id) => api.get(`/task-templates/${id}/attachments`).then((r) => r.data),
++  remove: (id, attId) =>
++    api.delete(`/task-templates/${id}/attachments/${attId}`).then((r) => r.data),
++  download: (id, attId) =>
++    api.get(`/task-templates/${id}/attachments/${attId}/download`, { responseType: "blob" }),
++  upload: async (id, file, onProgress) => {
++    const initRes = await api.post(`/task-templates/${id}/attachments/init`, {
++      filename: file.name,
++      content_type: file.type || "application/octet-stream",
++      total_size: file.size,
++    });
++    const uploadId = initRes.data.upload_id;
++    const total = file.size || 0;
++    let sent = 0;
++    let index = 0;
++    for (let start = 0; start < total; start += ATTACH_CHUNK_SIZE) {
++      const blob = file.slice(start, Math.min(start + ATTACH_CHUNK_SIZE, total));
++      const fd = new FormData();
++      fd.append("upload_id", uploadId);
++      fd.append("index", String(index));
++      fd.append("chunk", blob, file.name);
++      await api.post(`/task-templates/${id}/attachments/chunk`, fd);
++      sent += blob.size;
++      index += 1;
++      if (onProgress) onProgress(Math.min(99, Math.round((sent / total) * 100)));
++    }
++    const done = await api.post(`/task-templates/${id}/attachments/complete`, { upload_id: uploadId });
++    if (onProgress) onProgress(100);
++    return done.data;
++  },
++};
++
+ 
+ 
+diff --git a/frontend/src/lib/taskClipboard.js b/frontend/src/lib/taskClipboard.js
+new file mode 100644
+index 0000000..5901f0c
+--- /dev/null
++++ b/frontend/src/lib/taskClipboard.js
+@@ -0,0 +1,55 @@
++// Görev Kopyalama Panosu (Kopyala → Yapıştır).
++// Kopyalanan görev "pano"da tutulur; kullanıcı bir iş koluna sağ tıklayıp
++// "Yapıştır" deyince bu pano içeriği o iş koluna çoğaltılır. Pano ELLE
++// temizlenene kadar kalır → aynı görev birden fazla iş koluna yapıştırılabilir
++// (hazır şablon mantığı). localStorage'da kalıcı + pub/sub ile canlı güncellenir.
++import { useEffect, useState } from "react";
++
++const KEY = "sertex_task_clipboard_v1";
++const subs = new Set();
++
++function load() {
++  try {
++    const raw = localStorage.getItem(KEY);
++    return raw ? JSON.parse(raw) : null;
++  } catch {
++    return null;
++  }
++}
++
++let state = load();
++
++function persist() {
++  try {
++    if (state) localStorage.setItem(KEY, JSON.stringify(state));
++    else localStorage.removeItem(KEY);
++  } catch {
++    /* yoksay */
++  }
++}
++
++export function getTaskClipboard() {
++  return state;
++}
++
++// clip: { sourceId, title, includeSubtasks, includeAttachments }
++export function setTaskClipboard(clip) {
++  state = clip || null;
++  persist();
++  subs.forEach((fn) => fn(state));
++}
++
++export function clearTaskClipboard() {
++  setTaskClipboard(null);
++}
++
++export function useTaskClipboard() {
++  const [clip, setClip] = useState(state);
++  useEffect(() => {
++    const fn = (v) => setClip(v);
++    subs.add(fn);
++    setClip(state);
++    return () => subs.delete(fn);
++  }, []);
++  return clip;
++}
+diff --git a/mobile/app/(tabs)/tasks.tsx b/mobile/app/(tabs)/tasks.tsx
+index b63331c..6d9512a 100644
+--- a/mobile/app/(tabs)/tasks.tsx
++++ b/mobile/app/(tabs)/tasks.tsx
+@@ -19,11 +19,13 @@ import { Category, CompanyLite, Task, TaskGroup } from "@/src/api/types";
+ import { useAuth } from "@/src/auth/AuthContext";
+ import { isAdminLike } from "@/src/auth/roles";
+ import { CategorySection } from "@/src/components/CategorySection";
++import { TemplateBar } from "@/src/components/TemplateBar";
+ import { HudHeader } from "@/src/components/HudHeader";
+ import { LinkTasksModal } from "@/src/components/LinkTasksModal";
+ import { GroupBadge } from "@/src/components/TaskRow";
+ import { TaskFormModal } from "@/src/components/TaskFormModal";
+ import { allCategoryIds, buildTaskTree, CatNode, pruneEmpty } from "@/src/lib/taskTree";
++import { useTaskClipboard, clearTaskClipboard } from "@/src/lib/taskClipboard";
+ import { colors, monoFont, radius, spacing } from "@/src/theme/colors";
+ import { storage } from "@/src/utils/storage";
+ import { ARCHIVE, CATMGR, TASK_FORM, TASKS } from "@/constants/testIds";
+@@ -55,10 +57,31 @@ export default function TasksScreen() {
+ 
+   const [formVisible, setFormVisible] = useState(false);
+   const [linkVisible, setLinkVisible] = useState(false);
++  // Görev Kopyalama (Kopyala → Yapıştır) panosu.
++  const clipboard = useTaskClipboard();
+ 
+   const openCreate = useCallback(() => setFormVisible(true), []);
+   const openDetail = useCallback((task: Task) => router.push(`/task/${task.id}`), []);
+ 
++  const handlePaste = useCallback(
++    async (categoryId: string | null, categoryName: string) => {
++      if (!clipboard?.sourceId) return;
++      try {
++        await api.duplicateTask(clipboard.sourceId, {
++          include_subtasks: clipboard.includeSubtasks,
++          include_attachments: clipboard.includeAttachments,
++          category_id: categoryId,
++        });
++        Alert.alert("Yapıştırıldı", `Görev → ${categoryName || "Kolsuz"}`);
++        load("silent");
++      } catch (e) {
++        Alert.alert("Hata", e instanceof ApiError ? e.message : "Yapıştırılamadı");
++      }
++    },
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++    [clipboard],
++  );
++
+   const handleUnauthorized = useCallback(async () => {
+     await logout();
+     router.replace("/login");
+@@ -293,10 +316,37 @@ export default function TasksScreen() {
+             >
+               <Ionicons name="folder-outline" size={20} color={colors.primary} />
+             </Pressable>
++            <Pressable
++              onPress={() => router.push("/templates")}
++              hitSlop={10}
++              style={({ pressed }) => [styles.headerBtn, pressed && styles.pressed]}
++            >
++              <Ionicons name="albums-outline" size={20} color={colors.primary} />
++            </Pressable>
+           </View>
+         }
+       />
+ 
++      <TemplateBar onAuthError={() => { logout(); router.replace("/login"); }} />
++
++      {clipboard?.sourceId && (
++        <View style={styles.clipboardBar} testID={TASKS.clipboardBar}>
++          <Ionicons name="clipboard-outline" size={15} color={colors.primary} />
++          <Text style={styles.clipboardText} numberOfLines={1}>
++            Kopyalandı: {clipboard.title}
++          </Text>
++          <Pressable
++            testID={TASKS.clipboardClear}
++            onPress={() => clearTaskClipboard()}
++            hitSlop={8}
++            style={({ pressed }) => [styles.clipboardClear, pressed && styles.pressed]}
++          >
++            <Ionicons name="close" size={13} color={colors.danger} />
++            <Text style={styles.clipboardClearText}>Temizle</Text>
++          </Pressable>
++        </View>
++      )}
++
+       <View style={styles.toolbar}>
+         <View style={styles.searchBox}>
+           <Ionicons name="search" size={16} color={colors.textMuted} />
+@@ -457,6 +507,8 @@ export default function TasksScreen() {
+               busyId={busyId}
+               highlight={search}
+               groupBadges={groupBadges}
++              pasteVisible={!!clipboard?.sourceId}
++              onPaste={handlePaste}
+             />
+           ))}
+           <View style={{ height: spacing.xl }} />
+@@ -495,6 +547,22 @@ export default function TasksScreen() {
+ 
+ const styles = StyleSheet.create({
+   container: { flex: 1, backgroundColor: colors.bgBase },
++  clipboardBar: {
++    flexDirection: "row",
++    alignItems: "center",
++    gap: spacing.sm,
++    marginHorizontal: spacing.md,
++    marginBottom: spacing.sm,
++    paddingHorizontal: spacing.md,
++    paddingVertical: 8,
++    borderWidth: 1,
++    borderColor: colors.primary,
++    borderRadius: radius.md,
++    backgroundColor: colors.primary + "18",
++  },
++  clipboardText: { flex: 1, color: colors.primary, fontSize: 12, fontFamily: monoFont },
++  clipboardClear: { flexDirection: "row", alignItems: "center", gap: 3 },
++  clipboardClearText: { color: colors.danger, fontSize: 12, fontFamily: monoFont },
+   toolbar: {
+     flexDirection: "row",
+     alignItems: "center",
+diff --git a/mobile/app/task/[id].tsx b/mobile/app/task/[id].tsx
+index b87f390..2e00a42 100644
+--- a/mobile/app/task/[id].tsx
++++ b/mobile/app/task/[id].tsx
+@@ -3,6 +3,7 @@ import { router, useLocalSearchParams } from "expo-router";
+ import { useCallback, useEffect, useState } from "react";
+ import {
+   ActivityIndicator,
++  Alert,
+   Modal,
+   Pressable,
+   ScrollView,
+@@ -21,6 +22,7 @@ import { GroupSection } from "@/src/components/GroupSection";
+ import { LockSection } from "@/src/components/LockSection";
+ import { useAuth } from "@/src/auth/AuthContext";
+ import { TaskFormModal } from "@/src/components/TaskFormModal";
++import { CopyTaskModal } from "@/src/components/CopyTaskModal";
+ import { formatDateTime, genId, statusMeta } from "@/src/lib/format";
+ import { colors, monoFont, radius, spacing } from "@/src/theme/colors";
+ import { DETAIL } from "@/constants/testIds";
+@@ -44,6 +46,7 @@ export default function TaskDetailScreen() {
+   const [error, setError] = useState<string | null>(null);
+   const [newSub, setNewSub] = useState("");
+   const [editVisible, setEditVisible] = useState(false);
++  const [copyVisible, setCopyVisible] = useState(false);
+   const [policy, setPolicy] = useState<string>("optional");
+   const [reasonMode, setReasonMode] = useState<null | "cancel" | "delete">(null);
+   const [reasonText, setReasonText] = useState("");
+@@ -341,6 +344,14 @@ export default function TaskDetailScreen() {
+               <Ionicons name="trash-outline" size={18} color={colors.danger} />
+               <Text style={[styles.actionText, { color: colors.danger }]}>Sil</Text>
+             </Pressable>
++            <Pressable
++              testID={DETAIL.copy}
++              onPress={() => setCopyVisible(true)}
++              style={({ pressed }) => [styles.actionBtn, pressed && styles.pressed]}
++            >
++              <Ionicons name="copy-outline" size={18} color={colors.primary} />
++              <Text style={styles.actionText}>Kopyala</Text>
++            </Pressable>
+           </View>
+ 
+           <View style={styles.section}>
+@@ -496,6 +507,18 @@ export default function TaskDetailScreen() {
+         />
+       )}
+ 
++      <CopyTaskModal
++        visible={copyVisible}
++        task={task}
++        onClose={() => setCopyVisible(false)}
++        onCopied={() =>
++          Alert.alert(
++            "Panoya kopyalandı",
++            "Görevler ekranında bir iş kolu başlığındaki \"Yapıştır\" düğmesine dokunun.",
++          )
++        }
++      />
++
+       <Modal
+         visible={reassignVisible}
+         transparent
+diff --git a/mobile/app/templates.tsx b/mobile/app/templates.tsx
+new file mode 100644
+index 0000000..d54ab04
+--- /dev/null
++++ b/mobile/app/templates.tsx
+@@ -0,0 +1,215 @@
++import { Ionicons } from "@expo/vector-icons";
++import { router } from "expo-router";
++import { useCallback, useEffect, useState } from "react";
++import {
++  ActivityIndicator,
++  Alert,
++  Pressable,
++  RefreshControl,
++  ScrollView,
++  StyleSheet,
++  Text,
++  View,
++} from "react-native";
++import { useSafeAreaInsets } from "react-native-safe-area-context";
++
++import { api, ApiError } from "@/src/api/client";
++import { Category, TaskTemplate } from "@/src/api/types";
++import { useAuth } from "@/src/auth/AuthContext";
++import { TemplateFormModal } from "@/src/components/TemplateFormModal";
++import { colors, monoFont, radius, spacing } from "@/src/theme/colors";
++import { TEMPLATES } from "@/constants/testIds";
++
++export default function TemplatesScreen() {
++  const insets = useSafeAreaInsets();
++  const { logout } = useAuth();
++
++  const [items, setItems] = useState<TaskTemplate[]>([]);
++  const [categories, setCategories] = useState<Category[]>([]);
++  const [loading, setLoading] = useState(true);
++  const [refreshing, setRefreshing] = useState(false);
++  const [error, setError] = useState<string | null>(null);
++  const [form, setForm] = useState<{ template: TaskTemplate | null } | null>(null);
++  const [usingId, setUsingId] = useState<string | null>(null);
++
++  const onAuthError = useCallback(async () => {
++    await logout();
++    router.replace("/login");
++  }, [logout]);
++
++  const load = useCallback(
++    async (mode: "initial" | "refresh") => {
++      if (mode === "initial") setLoading(true);
++      else setRefreshing(true);
++      setError(null);
++      try {
++        const [tpls, cats] = await Promise.all([
++          api.listTemplates(),
++          api.categories("my_tasks").catch(() => [] as Category[]),
++        ]);
++        setItems(tpls);
++        setCategories(cats);
++      } catch (e) {
++        if (e instanceof ApiError && e.status === 401) return onAuthError();
++        setError(e instanceof ApiError ? e.message : "Şablonlar yüklenemedi");
++      } finally {
++        setLoading(false);
++        setRefreshing(false);
++      }
++    },
++    [onAuthError],
++  );
++
++  useEffect(() => { load("initial"); }, [load]);
++
++  const handleUse = async (t: TaskTemplate) => {
++    setUsingId(t.id);
++    try {
++      const task = await api.instantiateTemplate(t.id);
++      router.push(`/task/${task.id}`);
++    } catch (e) {
++      if (e instanceof ApiError && e.status === 401) return onAuthError();
++      Alert.alert("Hata", e instanceof ApiError ? e.message : "Oluşturulamadı");
++    } finally {
++      setUsingId(null);
++    }
++  };
++
++  const confirmDelete = (t: TaskTemplate) => {
++    Alert.alert("Şablonu sil?", `"${t.name}" silinecek.`, [
++      { text: "İptal", style: "cancel" },
++      {
++        text: "Sil",
++        style: "destructive",
++        onPress: async () => {
++          try {
++            await api.deleteTemplate(t.id);
++            setItems((p) => p.filter((x) => x.id !== t.id));
++          } catch (e) {
++            if (e instanceof ApiError && e.status === 401) return onAuthError();
++            Alert.alert("Hata", "Silinemedi");
++          }
++        },
++      },
++    ]);
++  };
++
++  return (
++    <View style={[styles.container, { paddingTop: insets.top }]} testID={TEMPLATES.screen}>
++      <View style={styles.header}>
++        <Pressable onPress={() => (router.canGoBack() ? router.back() : router.replace("/(tabs)/tasks"))} hitSlop={10}>
++          <Ionicons name="chevron-back" size={26} color={colors.textSecondary} />
++        </Pressable>
++        <Text style={styles.headerTitle}>ŞABLONLAR</Text>
++        <View style={{ width: 26 }} />
++      </View>
++
++      {loading ? (
++        <View style={styles.center}><ActivityIndicator size="large" color={colors.primary} /></View>
++      ) : error ? (
++        <View style={styles.center}>
++          <Ionicons name="cloud-offline-outline" size={40} color={colors.danger} />
++          <Text style={styles.errorText}>{error}</Text>
++          <Pressable onPress={() => load("initial")} style={({ pressed }) => [styles.retryBtn, pressed && styles.pressed]}>
++            <Text style={styles.retryText}>Tekrar Dene</Text>
++          </Pressable>
++        </View>
++      ) : (
++        <ScrollView
++          contentContainerStyle={styles.list}
++          refreshControl={
++            <RefreshControl refreshing={refreshing} onRefresh={() => load("refresh")} tintColor={colors.primary} colors={[colors.primary]} />
++          }
++        >
++          <Pressable testID={TEMPLATES.newBtn} onPress={() => setForm({ template: null })}
++            style={({ pressed }) => [styles.newBtn, pressed && styles.pressed]}>
++            <Ionicons name="add" size={18} color={colors.primary} />
++            <Text style={styles.newBtnText}>YENİ ŞABLON</Text>
++          </Pressable>
++
++          {items.length === 0 ? (
++            <View style={styles.empty} testID={TEMPLATES.empty}>
++              <Ionicons name="albums-outline" size={40} color={colors.textMuted} />
++              <Text style={styles.emptyTitle}>Henüz şablon yok</Text>
++              <Text style={styles.emptySub}>Sık kullandığın görevleri şablon olarak kaydet.</Text>
++            </View>
++          ) : (
++            items.map((t) => (
++              <View key={t.id} testID={`${TEMPLATES.row}-${t.id}`} style={styles.row}>
++                <View style={styles.rowInfo}>
++                  <View style={styles.rowTitleLine}>
++                    <Ionicons name={t.scope === "shared" ? "people-outline" : "person-outline"} size={13} color={t.scope === "shared" ? colors.primary : colors.textMuted} />
++                    <Text style={styles.rowName} numberOfLines={1}>{t.name}</Text>
++                  </View>
++                  <Text style={styles.rowSub} numberOfLines={1}>
++                    {t.title || "(başlık yok)"}{(t.subtasks?.length || 0) > 0 ? ` · ${t.subtasks.length} alt görev` : ""}
++                  </Text>
++                </View>
++                <Pressable testID={`${TEMPLATES.use}-${t.id}`} disabled={usingId === t.id} onPress={() => handleUse(t)}
++                  style={({ pressed }) => [styles.useBtn, pressed && styles.pressed]}>
++                  {usingId === t.id ? <ActivityIndicator size="small" color={colors.primary} /> : (
++                    <><Ionicons name="play" size={12} color={colors.primary} /><Text style={styles.useText}>Kullan</Text></>
++                  )}
++                </Pressable>
++                <Pressable testID={`${TEMPLATES.edit}-${t.id}`} onPress={() => setForm({ template: t })} hitSlop={6} style={styles.iconBtn}>
++                  <Ionicons name="create-outline" size={18} color={colors.textSecondary} />
++                </Pressable>
++                <Pressable testID={`${TEMPLATES.delete}-${t.id}`} onPress={() => confirmDelete(t)} hitSlop={6} style={styles.iconBtn}>
++                  <Ionicons name="trash-outline" size={18} color={colors.danger} />
++                </Pressable>
++              </View>
++            ))
++          )}
++        </ScrollView>
++      )}
++
++      {form && (
++        <TemplateFormModal
++          template={form.template}
++          categories={categories}
++          onClose={() => setForm(null)}
++          onSaved={() => load("refresh")}
++          onAuthError={onAuthError}
++        />
++      )}
++    </View>
++  );
++}
++
++const styles = StyleSheet.create({
++  container: { flex: 1, backgroundColor: colors.bgBase },
++  header: {
++    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
++    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
++    borderBottomWidth: 1, borderBottomColor: colors.border,
++  },
++  headerTitle: { color: colors.primary, fontSize: 15, fontWeight: "800", fontFamily: monoFont, letterSpacing: 1 },
++  center: { flex: 1, alignItems: "center", justifyContent: "center", gap: spacing.md, padding: spacing.lg },
++  errorText: { color: colors.textSecondary, fontSize: 14, textAlign: "center" },
++  retryBtn: { borderWidth: 1, borderColor: colors.primary, borderRadius: radius.md, paddingHorizontal: spacing.lg, paddingVertical: 10 },
++  retryText: { color: colors.primary, fontWeight: "700" },
++  list: { padding: spacing.md, gap: spacing.sm },
++  newBtn: {
++    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
++    borderWidth: 1, borderColor: colors.primary, borderRadius: radius.md, paddingVertical: 12, marginBottom: spacing.sm,
++  },
++  newBtnText: { color: colors.primary, fontWeight: "800", fontFamily: monoFont, letterSpacing: 1, fontSize: 13 },
++  empty: { alignItems: "center", gap: spacing.sm, paddingVertical: spacing.xl },
++  emptyTitle: { color: colors.textPrimary, fontSize: 16, fontWeight: "700" },
++  emptySub: { color: colors.textMuted, fontSize: 13, textAlign: "center" },
++  row: {
++    flexDirection: "row", alignItems: "center", gap: spacing.sm,
++    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, padding: spacing.md,
++  },
++  rowInfo: { flex: 1, minWidth: 0 },
++  rowTitleLine: { flexDirection: "row", alignItems: "center", gap: 5 },
++  rowName: { color: colors.textPrimary, fontSize: 14, fontWeight: "700", flexShrink: 1 },
++  rowSub: { color: colors.textMuted, fontSize: 12, fontFamily: monoFont, marginTop: 2 },
++  useBtn: {
++    flexDirection: "row", alignItems: "center", gap: 4,
++    borderWidth: 1, borderColor: colors.primary, borderRadius: radius.md, paddingHorizontal: 10, paddingVertical: 6,
++  },
++  useText: { color: colors.primary, fontSize: 12, fontWeight: "700" },
++  iconBtn: { padding: 4 },
++  pressed: { opacity: 0.6 },
++});
+diff --git a/mobile/constants/testIds/detail.js b/mobile/constants/testIds/detail.js
+index a1a180b..2d1905a 100644
+--- a/mobile/constants/testIds/detail.js
++++ b/mobile/constants/testIds/detail.js
+@@ -7,6 +7,12 @@ export const DETAIL = {
+   toggleStatus: 'task-detail-toggle-status-button',
+   delete: 'task-detail-delete-button',
+   cancelTask: 'task-detail-cancel-button',
++  copy: 'task-detail-copy-button',
++  copyModal: 'task-detail-copy-modal',
++  copyIncludeSubtasks: 'task-detail-copy-include-subtasks',
++  copyIncludeAttachments: 'task-detail-copy-include-attachments',
++  copyConfirm: 'task-detail-copy-confirm',
++  copyCancel: 'task-detail-copy-cancel',
+   startDate: 'task-detail-start-date',
+   deleteConfirm: 'task-detail-delete-confirm',
+   deleteCancel: 'task-detail-delete-cancel',
+diff --git a/mobile/constants/testIds/index.js b/mobile/constants/testIds/index.js
+index 9b40c39..6cde6d6 100644
+--- a/mobile/constants/testIds/index.js
++++ b/mobile/constants/testIds/index.js
+@@ -18,3 +18,4 @@ export * from './detail';
+ export * from './settings';
+ export * from './announce';
+ export * from './archive';
++export * from './templates';
+diff --git a/mobile/constants/testIds/tasks.js b/mobile/constants/testIds/tasks.js
+index 57f166f..d38bf2e 100644
+--- a/mobile/constants/testIds/tasks.js
++++ b/mobile/constants/testIds/tasks.js
+@@ -22,6 +22,10 @@ export const TASKS = {
+   hideEmpty: 'tasks-hide-empty-toggle',
+   companyFilter: 'tasks-company-filter',
+   companySearch: 'tasks-company-search',
++  // Görev Kopyalama (Kopyala → Yapıştır)
++  categoryPaste: 'tasks-category-paste',
++  clipboardBar: 'tasks-clipboard-bar',
++  clipboardClear: 'tasks-clipboard-clear',
+ };
+ 
+ // Görev Bağlama modalı (LinkTasksModal) — tasks ekranı + detay grup düzenleme.
+diff --git a/mobile/constants/testIds/templates.js b/mobile/constants/testIds/templates.js
+new file mode 100644
+index 0000000..da50a0a
+--- /dev/null
++++ b/mobile/constants/testIds/templates.js
+@@ -0,0 +1,25 @@
++// Görev Şablonları (Task Templates) test kimlikleri.
++export const TEMPLATES = {
++  screen: 'templates-screen',
++  newBtn: 'template-new-button',
++  empty: 'templates-empty',
++  row: 'template-row',        // `${row}-${id}`
++  use: 'template-use',        // `${use}-${id}`
++  edit: 'template-edit',      // `${edit}-${id}`
++  delete: 'template-delete',  // `${delete}-${id}`
++  // form
++  formModal: 'template-form-modal',
++  name: 'template-name-input',
++  title: 'template-title-input',
++  description: 'template-description-input',
++  scopePersonal: 'template-scope-personal',
++  scopeShared: 'template-scope-shared',
++  subtaskInput: 'template-subtask-input',
++  subtaskAdd: 'template-subtask-add',
++  save: 'template-save-button',
++  close: 'template-form-close',
++  // tasks-screen entry
++  bar: 'template-bar',
++  chip: 'template-chip',      // `${chip}-${id}`
++  manage: 'template-manage-button',
++};
+diff --git a/mobile/src/api/client.ts b/mobile/src/api/client.ts
+index f95b267..8c641f3 100644
+--- a/mobile/src/api/client.ts
++++ b/mobile/src/api/client.ts
+@@ -28,6 +28,7 @@ import {
+   SearchUser,
+   Task,
+   TaskAttachment,
++  TaskTemplate,
+   TaskCreatePayload,
+   TaskGroup,
+   TeamCategoryRow,
+@@ -123,6 +124,19 @@ export const api = {
+     request<Task>(`/tasks/${id}`, { method: "PATCH", body: patch }),
+   createTask: (body: TaskCreatePayload) =>
+     request<Task>("/tasks", { method: "POST", body }),
++  // Görev Kopyalama (Kopyala → Yapıştır) — kaynağı çoğaltır, kopya bana atanır.
++  duplicateTask: (
++    id: string,
++    opts: { include_subtasks?: boolean; include_attachments?: boolean; category_id?: string | null } = {},
++  ) =>
++    request<Task>(`/tasks/${id}/duplicate`, {
++      method: "POST",
++      body: {
++        include_subtasks: opts.include_subtasks ?? true,
++        include_attachments: opts.include_attachments ?? true,
++        category_id: opts.category_id ?? null,
++      },
++    }),
+   deleteTask: (id: string, reason?: string) =>
+     request<{ deleted: number }>(`/tasks/${id}${reason ? `?reason=${encodeURIComponent(reason)}` : ""}`, { method: "DELETE" }),
+   searchUsers: (q: string) =>
+@@ -266,6 +280,22 @@ export const api = {
+     request<{ deleted: number }>(`/tasks/${tid}/attachments/${attId}`, {
+       method: "DELETE",
+     }),
++
++  // ── Görev Şablonları (Task Templates) ──
++  listTemplates: () => request<TaskTemplate[]>("/task-templates"),
++  getTemplate: (id: string) => request<TaskTemplate>(`/task-templates/${id}`),
++  createTemplate: (body: Partial<TaskTemplate>) =>
++    request<TaskTemplate>("/task-templates", { method: "POST", body }),
++  updateTemplate: (id: string, patch: Partial<TaskTemplate>) =>
++    request<TaskTemplate>(`/task-templates/${id}`, { method: "PATCH", body: patch }),
++  deleteTemplate: (id: string) =>
++    request<{ deleted: number }>(`/task-templates/${id}`, { method: "DELETE" }),
++  instantiateTemplate: (id: string, category_id: string | null = null) =>
++    request<Task>(`/task-templates/${id}/instantiate`, { method: "POST", body: { category_id } }),
++  listTemplateAttachments: (id: string) =>
++    request<TaskAttachment[]>(`/task-templates/${id}/attachments`),
++  deleteTemplateAttachment: (id: string, attId: string) =>
++    request<{ deleted: number }>(`/task-templates/${id}/attachments/${attId}`, { method: "DELETE" }),
+   myCompletion: (id: string, completed: boolean) =>
+     request<Task>(`/tasks/${id}/my-completion`, { method: "POST", body: { completed } }),
+   companies: () => request<CompanyLite[]>("/task-transfer-companies"),
+@@ -329,6 +359,11 @@ export function attachmentDownloadUrl(tid: string, attId: string): string {
+   return `${BASE}/api/tasks/${tid}/attachments/${attId}/download`;
+ }
+ 
++// Şablon dosya eki indirme URL'i (aynı imza).
++export function templateAttachmentDownloadUrl(tid: string, attId: string): string {
++  return `${BASE}/api/task-templates/${tid}/attachments/${attId}/download`;
++}
++
+ // Authorization header for authed asset fetches (expo-image / downloadAsync).
+ export async function authHeader(): Promise<Record<string, string>> {
+   const token = await storage.secureGet<string>(AUTH_TOKEN_KEY, "");
+@@ -340,9 +375,11 @@ export async function authHeader(): Promise<Record<string, string>> {
+ export async function uploadAttachment(
+   tid: string,
+   file: { uri: string; name: string; type: string; size?: number },
++  kind: "task" | "template" = "task",
+ ): Promise<TaskAttachment> {
++  const base = kind === "template" ? `/task-templates/${tid}` : `/tasks/${tid}`;
+   const init = await request<{ upload_id: string }>(
+-    `/tasks/${tid}/attachments/init`,
++    `${base}/attachments/init`,
+     {
+       method: "POST",
+       body: {
+@@ -375,7 +412,7 @@ export async function uploadAttachment(
+ 
+   let chunkRes: Response;
+   try {
+-    chunkRes = await fetch(`${BASE}/api/tasks/${tid}/attachments/chunk`, {
++    chunkRes = await fetch(`${BASE}/api${base}/attachments/chunk`, {
+       method: "POST",
+       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+       body: form,
+@@ -388,7 +425,7 @@ export async function uploadAttachment(
+     throw new ApiError(chunkRes.status, t || "Dosya yüklenemedi");
+   }
+ 
+-  return request<TaskAttachment>(`/tasks/${tid}/attachments/complete`, {
++  return request<TaskAttachment>(`${base}/attachments/complete`, {
+     method: "POST",
+     body: { upload_id: uploadId },
+   });
+diff --git a/mobile/src/api/types.ts b/mobile/src/api/types.ts
+index 4a901bc..51065ae 100644
+--- a/mobile/src/api/types.ts
++++ b/mobile/src/api/types.ts
+@@ -42,6 +42,25 @@ export type Subtask = {
+   status?: string | null;
+ };
+ 
++// Görev Şablonu (Task Template) — mirrors backend TaskTemplate.
++export type TaskTemplate = {
++  id: string;
++  name: string;
++  title: string;
++  description: string;
++  category_id?: string | null;
++  reminder_days?: number | null;
++  reminder_disabled?: boolean;
++  subtasks: { id?: string; text: string }[];
++  scope: "personal" | "shared";
++  company_id?: string | null;
++  owner_id?: string;
++  created_by?: string;
++  created_by_name?: string | null;
++  created_at?: string;
++  updated_at?: string;
++};
++
+ export type Task = {
+   id: string;
+   title: string;
+diff --git a/mobile/src/components/AttachmentsSection.tsx b/mobile/src/components/AttachmentsSection.tsx
+index 0db118c..04cecc1 100644
+--- a/mobile/src/components/AttachmentsSection.tsx
++++ b/mobile/src/components/AttachmentsSection.tsx
+@@ -25,6 +25,7 @@ import {
+   api,
+   ApiError,
+   attachmentDownloadUrl,
++  templateAttachmentDownloadUrl,
+   authHeader,
+   uploadAttachment,
+ } from "@/src/api/client";
+@@ -35,6 +36,8 @@ import { DETAIL } from "@/constants/testIds";
+ type Props = {
+   taskId: string;
+   onAuthError: () => void;
++  // "template" → şablon ekleri (aynı UI, farklı uç noktalar).
++  kind?: "task" | "template";
+ };
+ 
+ type PickedFile = { uri: string; name: string; type: string; size?: number };
+@@ -65,8 +68,11 @@ function fileIcon(ct?: string | null): keyof typeof Ionicons.glyphMap {
+   return "document-attach-outline";
+ }
+ 
+-export const AttachmentsSection = ({ taskId, onAuthError }: Props) => {
++export const AttachmentsSection = ({ taskId, onAuthError, kind = "task" }: Props) => {
+   const insets = useSafeAreaInsets();
++  const isTpl = kind === "template";
++  const dlUrl = (attId: string) =>
++    isTpl ? templateAttachmentDownloadUrl(taskId, attId) : attachmentDownloadUrl(taskId, attId);
+   const [items, setItems] = useState<TaskAttachment[]>([]);
+   const [loading, setLoading] = useState(true);
+   const [uploading, setUploading] = useState(false);
+@@ -81,14 +87,16 @@ export const AttachmentsSection = ({ taskId, onAuthError }: Props) => {
+ 
+   const load = useCallback(async () => {
+     try {
+-      const rows = await api.listAttachments(taskId);
++      const rows = isTpl
++        ? await api.listTemplateAttachments(taskId)
++        : await api.listAttachments(taskId);
+       setItems(rows);
+     } catch (e) {
+       if (e instanceof ApiError && e.status === 401) return onAuthError();
+     } finally {
+       setLoading(false);
+     }
+-  }, [taskId, onAuthError]);
++  }, [taskId, onAuthError, isTpl]);
+ 
+   useEffect(() => {
+     load();
+@@ -100,7 +108,7 @@ export const AttachmentsSection = ({ taskId, onAuthError }: Props) => {
+       setUploading(true);
+       setError(null);
+       try {
+-        await uploadAttachment(taskId, file);
++        await uploadAttachment(taskId, file, kind);
+         await load();
+       } catch (e) {
+         if (e instanceof ApiError && e.status === 401) return onAuthError();
+@@ -110,7 +118,7 @@ export const AttachmentsSection = ({ taskId, onAuthError }: Props) => {
+         setUploading(false);
+       }
+     },
+-    [taskId, load, onAuthError],
++    [taskId, load, onAuthError, kind],
+   );
+ 
+   const ensureCamera = async (): Promise<boolean> => {
+@@ -189,7 +197,7 @@ export const AttachmentsSection = ({ taskId, onAuthError }: Props) => {
+     setDeleteTarget(null);
+     setError(null);
+     try {
+-      await api.deleteAttachment(taskId, target.id);
++      await (isTpl ? api.deleteTemplateAttachment(taskId, target.id) : api.deleteAttachment(taskId, target.id));
+       await load();
+     } catch (e) {
+       if (e instanceof ApiError && e.status === 401) return onAuthError();
+@@ -205,7 +213,7 @@ export const AttachmentsSection = ({ taskId, onAuthError }: Props) => {
+     setError(null);
+     setOpening(att.id);
+     try {
+-      const url = attachmentDownloadUrl(taskId, att.id);
++      const url = dlUrl(att.id);
+       const safe = (att.original_filename || "dosya").replace(/[^\w.\-]+/g, "_");
+       const dest = `${FileSystem.cacheDirectory}${Date.now()}_${safe}`;
+       const dl = await FileSystem.downloadAsync(url, dest, { headers });
+@@ -279,7 +287,7 @@ export const AttachmentsSection = ({ taskId, onAuthError }: Props) => {
+             <Pressable style={styles.itemBody} onPress={() => openItem(att)}>
+               {isImage(att.content_type) ? (
+                 <Image
+-                  source={{ uri: attachmentDownloadUrl(taskId, att.id), headers }}
++                  source={{ uri: dlUrl(att.id), headers }}
+                   style={styles.thumb}
+                   contentFit="cover"
+                   transition={150}
+@@ -350,7 +358,7 @@ export const AttachmentsSection = ({ taskId, onAuthError }: Props) => {
+           </Pressable>
+           {preview && (
+             <Image
+-              source={{ uri: attachmentDownloadUrl(taskId, preview.id), headers }}
++              source={{ uri: dlUrl(preview.id), headers }}
+               style={styles.previewImage}
+               contentFit="contain"
+               transition={150}
+diff --git a/mobile/src/components/CategorySection.tsx b/mobile/src/components/CategorySection.tsx
+index c1d6394..3a49b30 100644
+--- a/mobile/src/components/CategorySection.tsx
++++ b/mobile/src/components/CategorySection.tsx
+@@ -20,6 +20,9 @@ type Props = {
+   busyId: string | null;
+   highlight?: string;
+   groupBadges?: Record<string, GroupBadge>;
++  // Görev Kopyalama — pano dolu iken başlıkta "Yapıştır" düğmesi göster.
++  pasteVisible?: boolean;
++  onPaste?: (categoryId: string | null, categoryName: string) => void;
+ };
+ 
+ export const CategorySection = ({
+@@ -32,10 +35,13 @@ export const CategorySection = ({
+   busyId,
+   highlight,
+   groupBadges,
++  pasteVisible,
++  onPaste,
+ }: Props) => {
+   const isOpen = expanded[node.category.id] !== false; // default open
+   const { rollup, category } = node;
+   const color = category.color || colors.primary;
++  const pasteCatId = category.id === "__uncat__" ? null : category.id;
+ 
+   return (
+     <View style={[styles.wrap, depth > 0 && { marginLeft: spacing.md }]}>
+@@ -53,6 +59,17 @@ export const CategorySection = ({
+         <Text style={styles.name} numberOfLines={1}>
+           {category.name}
+         </Text>
++        {pasteVisible && onPaste && (
++          <Pressable
++            testID={`${TASKS.categoryPaste}-${category.id}`}
++            onPress={() => onPaste(pasteCatId, category.name)}
++            hitSlop={8}
++            style={({ pressed }) => [styles.pasteBtn, pressed && styles.pressed]}
++          >
++            <Ionicons name="clipboard-outline" size={13} color={colors.primary} />
++            <Text style={styles.pasteText}>Yapıştır</Text>
++          </Pressable>
++        )}
+         <View style={styles.count}>
+           <Text style={styles.countText}>
+             {rollup.done}/{rollup.total}
+@@ -85,6 +102,8 @@ export const CategorySection = ({
+               busyId={busyId}
+               highlight={highlight}
+               groupBadges={groupBadges}
++              pasteVisible={pasteVisible}
++              onPaste={onPaste}
+             />
+           ))}
+           {node.tasks.length === 0 && node.children.length === 0 && (
+@@ -112,6 +131,18 @@ const styles = StyleSheet.create({
+   pressed: { opacity: 0.7 },
+   colorDot: { width: 8, height: 8, borderRadius: 4 },
+   name: { flex: 1, color: colors.textPrimary, fontSize: 14, fontWeight: "700", letterSpacing: 0.5 },
++  pasteBtn: {
++    flexDirection: "row",
++    alignItems: "center",
++    gap: 4,
++    borderWidth: 1,
++    borderColor: colors.primary,
++    borderRadius: radius.pill,
++    paddingHorizontal: 8,
++    paddingVertical: 3,
++    backgroundColor: colors.primary + "22",
++  },
++  pasteText: { color: colors.primary, fontSize: 11, fontFamily: monoFont, fontWeight: "700" },
+   count: {
+     borderWidth: 1,
+     borderColor: colors.borderStrong,
+diff --git a/mobile/src/components/CopyTaskModal.tsx b/mobile/src/components/CopyTaskModal.tsx
+new file mode 100644
+index 0000000..e55deea
+--- /dev/null
++++ b/mobile/src/components/CopyTaskModal.tsx
+@@ -0,0 +1,209 @@
++// Görev Kopyalama penceresi (mobil) — task detay ekranından "Kopyala" ile
++// açılır. Alt görev ve dosya eklerinin de kopyalanıp kopyalanmayacağı seçilir
++// (görevde yoksa o seçenek gizli). Onayla → görev panoya alınır; kullanıcı bir
++// iş kolu başlığındaki "Yapıştır" düğmesine dokunur.
++import { Ionicons } from "@expo/vector-icons";
++import { useEffect, useState } from "react";
++import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, View } from "react-native";
++
++import { api } from "@/src/api/client";
++import { Task } from "@/src/api/types";
++import { setTaskClipboard } from "@/src/lib/taskClipboard";
++import { colors, monoFont, radius, spacing } from "@/src/theme/colors";
++import { DETAIL } from "@/constants/testIds";
++
++type Props = {
++  visible: boolean;
++  task: Task | null;
++  onClose: () => void;
++  onCopied?: () => void;
++};
++
++export const CopyTaskModal = ({ visible, task, onClose, onCopied }: Props) => {
++  const subtaskCount = (task?.subtasks || []).length;
++  const [attCount, setAttCount] = useState<number | null>(null);
++  const [includeSubtasks, setIncludeSubtasks] = useState(true);
++  const [includeAttachments, setIncludeAttachments] = useState(true);
++
++  useEffect(() => {
++    if (!visible || !task) return;
++    setAttCount(null);
++    setIncludeSubtasks(true);
++    setIncludeAttachments(true);
++    let alive = true;
++    (async () => {
++      try {
++        const rows = await api.listAttachments(task.id);
++        if (alive) setAttCount(Array.isArray(rows) ? rows.length : 0);
++      } catch {
++        if (alive) setAttCount(0);
++      }
++    })();
++    return () => {
++      alive = false;
++    };
++  }, [visible, task]);
++
++  if (!task) return null;
++
++  const confirm = () => {
++    setTaskClipboard({
++      sourceId: task.id,
++      title: task.title,
++      includeSubtasks: subtaskCount > 0 ? includeSubtasks : false,
++      includeAttachments: (attCount || 0) > 0 ? includeAttachments : false,
++    });
++    onClose();
++    onCopied?.();
++  };
++
++  const Row = ({
++    checked,
++    onToggle,
++    label,
++    testID,
++  }: {
++    checked: boolean;
++    onToggle: () => void;
++    label: string;
++    testID: string;
++  }) => (
++    <Pressable
++      testID={testID}
++      onPress={onToggle}
++      style={({ pressed }) => [styles.row, pressed && styles.pressed]}
++    >
++      <View style={[styles.box, checked && styles.boxOn]}>
++        {checked && <Ionicons name="checkmark" size={15} color={colors.primary} />}
++      </View>
++      <Text style={styles.rowLabel}>{label}</Text>
++    </Pressable>
++  );
++
++  return (
++    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
++      <Pressable style={styles.backdrop} onPress={onClose}>
++        <Pressable style={styles.card} testID={DETAIL.copyModal} onPress={() => {}}>
++          <View style={styles.header}>
++            <View style={styles.headerLeft}>
++              <Ionicons name="copy-outline" size={18} color={colors.primary} />
++              <Text style={styles.title}>GÖREVİ KOPYALA</Text>
++            </View>
++            <Pressable testID={DETAIL.copyCancel} onPress={onClose} hitSlop={10}>
++              <Ionicons name="close" size={20} color={colors.textMuted} />
++            </Pressable>
++          </View>
++          <Text style={styles.sub} numberOfLines={2}>
++            &quot;{task.title}&quot;
++          </Text>
++
++          {attCount === null ? (
++            <View style={styles.loading}>
++              <ActivityIndicator color={colors.primary} />
++            </View>
++          ) : (
++            <View style={styles.rows}>
++              {subtaskCount > 0 && (
++                <Row
++                  checked={includeSubtasks}
++                  onToggle={() => setIncludeSubtasks((v) => !v)}
++                  label={`Alt görevleri dahil et (${subtaskCount})`}
++                  testID={DETAIL.copyIncludeSubtasks}
++                />
++              )}
++              {(attCount || 0) > 0 && (
++                <Row
++                  checked={includeAttachments}
++                  onToggle={() => setIncludeAttachments((v) => !v)}
++                  label={`Dosya eklerini dahil et (${attCount})`}
++                  testID={DETAIL.copyIncludeAttachments}
++                />
++              )}
++              {subtaskCount === 0 && (attCount || 0) === 0 && (
++                <Text style={styles.note}>
++                  Görevin kendisi kopyalanacak (alt görev / dosya eki yok).
++                </Text>
++              )}
++            </View>
++          )}
++
++          <View style={styles.actions}>
++            <Pressable
++              testID={DETAIL.copyCancel}
++              onPress={onClose}
++              style={({ pressed }) => [styles.btn, styles.btnGhost, pressed && styles.pressed]}
++            >
++              <Text style={styles.btnGhostText}>VAZGEÇ</Text>
++            </Pressable>
++            <Pressable
++              testID={DETAIL.copyConfirm}
++              onPress={confirm}
++              disabled={attCount === null}
++              style={({ pressed }) => [
++                styles.btn,
++                styles.btnPrimary,
++                (pressed || attCount === null) && styles.pressed,
++              ]}
++            >
++              <Text style={styles.btnPrimaryText}>KOPYALA</Text>
++            </Pressable>
++          </View>
++        </Pressable>
++      </Pressable>
++    </Modal>
++  );
++};
++
++const styles = StyleSheet.create({
++  backdrop: {
++    flex: 1,
++    backgroundColor: "rgba(0,0,0,0.6)",
++    justifyContent: "center",
++    alignItems: "center",
++    padding: spacing.lg,
++  },
++  card: {
++    width: "100%",
++    maxWidth: 420,
++    backgroundColor: colors.surface,
++    borderWidth: 1,
++    borderColor: colors.primary,
++    borderRadius: radius.lg,
++    padding: spacing.lg,
++  },
++  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
++  headerLeft: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
++  title: { color: colors.primary, fontSize: 14, fontWeight: "700", fontFamily: monoFont, letterSpacing: 0.5 },
++  sub: { color: colors.textSecondary, fontSize: 13, marginTop: 6, marginBottom: spacing.md },
++  loading: { paddingVertical: spacing.lg, alignItems: "center" },
++  rows: { gap: spacing.sm },
++  row: {
++    flexDirection: "row",
++    alignItems: "center",
++    gap: spacing.sm,
++    borderWidth: 1,
++    borderColor: colors.border,
++    borderRadius: radius.md,
++    paddingHorizontal: spacing.md,
++    paddingVertical: 12,
++  },
++  box: {
++    width: 22,
++    height: 22,
++    borderRadius: 5,
++    borderWidth: 1,
++    borderColor: colors.borderStrong,
++    alignItems: "center",
++    justifyContent: "center",
++  },
++  boxOn: { borderColor: colors.primary, backgroundColor: colors.primary + "22" },
++  rowLabel: { flex: 1, color: colors.textPrimary, fontSize: 13 },
++  note: { color: colors.textMuted, fontSize: 12, fontStyle: "italic", paddingVertical: spacing.sm },
++  actions: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.lg },
++  btn: { flex: 1, paddingVertical: 12, borderRadius: radius.md, alignItems: "center", borderWidth: 1 },
++  btnGhost: { borderColor: colors.border },
++  btnGhostText: { color: colors.textSecondary, fontSize: 13, fontWeight: "700", fontFamily: monoFont },
++  btnPrimary: { borderColor: colors.primary, backgroundColor: colors.primary + "22" },
++  btnPrimaryText: { color: colors.primary, fontSize: 13, fontWeight: "700", fontFamily: monoFont },
++  pressed: { opacity: 0.6 },
++});
+diff --git a/mobile/src/components/TemplateBar.tsx b/mobile/src/components/TemplateBar.tsx
+new file mode 100644
+index 0000000..0a33721
+--- /dev/null
++++ b/mobile/src/components/TemplateBar.tsx
+@@ -0,0 +1,89 @@
++import { Ionicons } from "@expo/vector-icons";
++import { useFocusEffect, useRouter } from "expo-router";
++import { useCallback, useState } from "react";
++import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
++
++import { api, ApiError } from "@/src/api/client";
++import { TaskTemplate } from "@/src/api/types";
++import { colors, monoFont, radius, spacing } from "@/src/theme/colors";
++import { TEMPLATES } from "@/constants/testIds";
++
++// "Şablondan başla" çubuğu — görevler ekranında. Çipe dokun → o şablondan
++// görev oluştur (instantiate) → görev detayına (düzenlemeye) git. "Şablonlar"
++// düğmesi kütüphaneyi açar.
++export const TemplateBar = ({ onAuthError }: { onAuthError: () => void }) => {
++  const router = useRouter();
++  const [items, setItems] = useState<TaskTemplate[]>([]);
++  const [loading, setLoading] = useState(true);
++  const [usingId, setUsingId] = useState<string | null>(null);
++
++  useFocusEffect(
++    useCallback(() => {
++      let alive = true;
++      api.listTemplates()
++        .then((r) => alive && setItems(Array.isArray(r) ? r : []))
++        .catch(() => alive && setItems([]))
++        .finally(() => alive && setLoading(false));
++      return () => { alive = false; };
++    }, []),
++  );
++
++  const use = async (t: TaskTemplate) => {
++    setUsingId(t.id);
++    try {
++      const task = await api.instantiateTemplate(t.id);
++      router.push(`/task/${task.id}`);
++    } catch (e) {
++      if (e instanceof ApiError && e.status === 401) return onAuthError();
++    } finally {
++      setUsingId(null);
++    }
++  };
++
++  return (
++    <View style={styles.wrap} testID={TEMPLATES.bar}>
++      <Ionicons name="albums-outline" size={14} color={colors.textMuted} />
++      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
++        {loading ? (
++          <ActivityIndicator size="small" color={colors.primary} />
++        ) : (
++          items.slice(0, 12).map((t) => (
++            <Pressable key={t.id} testID={`${TEMPLATES.chip}-${t.id}`} disabled={usingId === t.id}
++              onPress={() => use(t)} style={({ pressed }) => [styles.chip, pressed && styles.pressed]}>
++              {usingId === t.id && <ActivityIndicator size="small" color={colors.primary} />}
++              <Text style={styles.chipText} numberOfLines={1}>{t.name}</Text>
++            </Pressable>
++          ))
++        )}
++        <Pressable testID={TEMPLATES.manage} onPress={() => router.push("/templates")}
++          style={({ pressed }) => [styles.manage, pressed && styles.pressed]}>
++          <Ionicons name="add" size={14} color={colors.textMuted} />
++          <Text style={styles.manageText}>Şablonlar</Text>
++        </Pressable>
++      </ScrollView>
++    </View>
++  );
++};
++
++const styles = StyleSheet.create({
++  wrap: {
++    flexDirection: "row", alignItems: "center", gap: spacing.xs,
++    paddingHorizontal: spacing.md, marginBottom: spacing.sm,
++  },
++  chips: { flexDirection: "row", alignItems: "center", gap: spacing.xs, paddingRight: spacing.md },
++  chip: {
++    flexDirection: "row", alignItems: "center", gap: 4,
++    borderWidth: 1, borderColor: colors.primary + "66", borderRadius: radius.pill,
++    paddingHorizontal: 12, paddingVertical: 6, backgroundColor: colors.primary + "12", maxWidth: 160,
++  },
++  chipText: { color: colors.primary, fontSize: 12, fontFamily: monoFont },
++  manage: {
++    flexDirection: "row", alignItems: "center", gap: 3,
++    borderWidth: 1, borderColor: colors.border, borderRadius: radius.pill,
++    paddingHorizontal: 12, paddingVertical: 6,
++  },
++  manageText: { color: colors.textMuted, fontSize: 12, fontFamily: monoFont },
++  pressed: { opacity: 0.6 },
++});
++
++export default TemplateBar;
+diff --git a/mobile/src/components/TemplateFormModal.tsx b/mobile/src/components/TemplateFormModal.tsx
+new file mode 100644
+index 0000000..0598dbc
+--- /dev/null
++++ b/mobile/src/components/TemplateFormModal.tsx
+@@ -0,0 +1,254 @@
++import { Ionicons } from "@expo/vector-icons";
++import { useState } from "react";
++import {
++  ActivityIndicator,
++  Alert,
++  Modal,
++  Pressable,
++  ScrollView,
++  StyleSheet,
++  Text,
++  TextInput,
++  View,
++} from "react-native";
++
++import { api, ApiError } from "@/src/api/client";
++import { Category, TaskTemplate } from "@/src/api/types";
++import { AttachmentsSection } from "@/src/components/AttachmentsSection";
++import { colors, monoFont, radius, spacing } from "@/src/theme/colors";
++import { TEMPLATES } from "@/constants/testIds";
++
++const REMINDER_CHOICES = [1, 2, 3, 5, 7, 14, 30];
++
++type Props = {
++  template: TaskTemplate | null; // null → yeni
++  categories: Category[];
++  onClose: () => void;
++  onSaved: () => void;
++  onAuthError: () => void;
++};
++
++export const TemplateFormModal = ({ template, categories, onClose, onSaved, onAuthError }: Props) => {
++  const [tplId, setTplId] = useState<string | null>(template?.id || null);
++  const [name, setName] = useState(template?.name || "");
++  const [title, setTitle] = useState(template?.title || "");
++  const [description, setDescription] = useState(template?.description || "");
++  const [categoryId, setCategoryId] = useState<string | null>(template?.category_id || null);
++  const [reminderDays, setReminderDays] = useState<number | null | "off">(
++    template?.reminder_disabled ? "off" : (template?.reminder_days ?? null),
++  );
++  const [scope, setScope] = useState<"personal" | "shared">(template?.scope === "shared" ? "shared" : "personal");
++  const [subtasks, setSubtasks] = useState<{ id?: string; text: string }[]>(template?.subtasks || []);
++  const [newSub, setNewSub] = useState("");
++  const [saving, setSaving] = useState(false);
++
++  const addSub = () => {
++    const t = newSub.trim();
++    if (!t) return;
++    setSubtasks((p) => [...p, { text: t }]);
++    setNewSub("");
++  };
++
++  const save = async () => {
++    if (name.trim().length < 2) {
++      Alert.alert("Eksik", "Şablon adı en az 2 karakter olmalı");
++      return;
++    }
++    const body: Partial<TaskTemplate> & { reminder_disabled?: boolean } = {
++      name: name.trim(),
++      title: title.trim(),
++      description: description.trim(),
++      category_id: categoryId,
++      scope,
++      subtasks: subtasks.map((s) => ({ text: s.text })),
++    };
++    if (reminderDays === "off") {
++      body.reminder_disabled = true;
++      body.reminder_days = 0;
++    } else {
++      body.reminder_disabled = false;
++      body.reminder_days = reminderDays;
++    }
++    setSaving(true);
++    try {
++      if (tplId) {
++        await api.updateTemplate(tplId, body);
++        onSaved();
++        onClose();
++      } else {
++        const created = await api.createTemplate(body);
++        setTplId(created.id);
++        onSaved();
++        Alert.alert("Kaydedildi", "Şablon kaydedildi — artık dosya ekleyebilirsiniz.");
++      }
++    } catch (e) {
++      if (e instanceof ApiError && e.status === 401) return onAuthError();
++      Alert.alert("Hata", e instanceof ApiError ? e.message : "Kaydedilemedi");
++    } finally {
++      setSaving(false);
++    }
++  };
++
++  return (
++    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
++      <View style={styles.backdrop}>
++        <View style={styles.card} testID={TEMPLATES.formModal}>
++          <View style={styles.header}>
++            <Text style={styles.headerTitle}>{tplId ? "ŞABLONU DÜZENLE" : "YENİ ŞABLON"}</Text>
++            <Pressable testID={TEMPLATES.close} onPress={onClose} hitSlop={10}>
++              <Ionicons name="close" size={22} color={colors.textMuted} />
++            </Pressable>
++          </View>
++
++          <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: spacing.lg }}>
++            <Text style={styles.label}>ŞABLON ADI *</Text>
++            <TextInput testID={TEMPLATES.name} value={name} onChangeText={setName} placeholder="Örn: Haftalık Rapor"
++              placeholderTextColor={colors.textMuted} style={styles.input} />
++
++            <Text style={styles.label}>KAPSAM</Text>
++            <View style={styles.row}>
++              <Pressable testID={TEMPLATES.scopePersonal} onPress={() => setScope("personal")}
++                style={[styles.toggle, scope === "personal" && styles.toggleOn]}>
++                <Ionicons name="person-outline" size={14} color={scope === "personal" ? colors.primary : colors.textMuted} />
++                <Text style={[styles.toggleText, scope === "personal" && styles.toggleTextOn]}>Kişisel</Text>
++              </Pressable>
++              <Pressable testID={TEMPLATES.scopeShared} onPress={() => setScope("shared")}
++                style={[styles.toggle, scope === "shared" && styles.toggleOn]}>
++                <Ionicons name="people-outline" size={14} color={scope === "shared" ? colors.primary : colors.textMuted} />
++                <Text style={[styles.toggleText, scope === "shared" && styles.toggleTextOn]}>Ekip</Text>
++              </Pressable>
++            </View>
++
++            <Text style={styles.label}>GÖREV BAŞLIĞI</Text>
++            <TextInput testID={TEMPLATES.title} value={title} onChangeText={setTitle} placeholder="Görevin başlığı"
++              placeholderTextColor={colors.textMuted} style={styles.input} />
++
++            <Text style={styles.label}>AÇIKLAMA</Text>
++            <TextInput testID={TEMPLATES.description} value={description} onChangeText={setDescription} multiline
++              placeholder="Açıklama" placeholderTextColor={colors.textMuted} style={[styles.input, styles.textarea]} />
++
++            {categories.length > 0 && (
++              <>
++                <Text style={styles.label}>İŞ KOLU</Text>
++                <View style={styles.chipsWrap}>
++                  <Pressable onPress={() => setCategoryId(null)} style={[styles.chip, !categoryId && styles.chipOn]}>
++                    <Text style={[styles.chipText, !categoryId && styles.chipTextOn]}>Yok</Text>
++                  </Pressable>
++                  {categories.map((c) => (
++                    <Pressable key={c.id} onPress={() => setCategoryId(c.id)} style={[styles.chip, categoryId === c.id && styles.chipOn]}>
++                      <Text style={[styles.chipText, categoryId === c.id && styles.chipTextOn]} numberOfLines={1}>{c.name}</Text>
++                    </Pressable>
++                  ))}
++                </View>
++              </>
++            )}
++
++            <Text style={styles.label}>YAKLAŞAN UYARISI</Text>
++            <View style={styles.chipsWrap}>
++              <Pressable onPress={() => setReminderDays(null)} style={[styles.chip, reminderDays === null && styles.chipOn]}>
++                <Text style={[styles.chipText, reminderDays === null && styles.chipTextOn]}>Varsayılan</Text>
++              </Pressable>
++              {REMINDER_CHOICES.map((d) => (
++                <Pressable key={d} onPress={() => setReminderDays(d)} style={[styles.chip, reminderDays === d && styles.chipOn]}>
++                  <Text style={[styles.chipText, reminderDays === d && styles.chipTextOn]}>{d}g</Text>
++                </Pressable>
++              ))}
++              <Pressable onPress={() => setReminderDays("off")} style={[styles.chip, reminderDays === "off" && styles.chipOn]}>
++                <Text style={[styles.chipText, reminderDays === "off" && styles.chipTextOn]}>Kapalı</Text>
++              </Pressable>
++            </View>
++
++            <Text style={styles.label}>ALT GÖREVLER</Text>
++            {subtasks.map((s, i) => (
++              <View key={s.id || i} style={styles.subRow}>
++                <Text style={styles.subText} numberOfLines={1}>{s.text}</Text>
++                <Pressable onPress={() => setSubtasks((p) => p.filter((_, idx) => idx !== i))} hitSlop={8}>
++                  <Ionicons name="trash-outline" size={16} color={colors.danger} />
++                </Pressable>
++              </View>
++            ))}
++            <View style={styles.row}>
++              <TextInput testID={TEMPLATES.subtaskInput} value={newSub} onChangeText={setNewSub} placeholder="Alt görev ekle…"
++                placeholderTextColor={colors.textMuted} style={[styles.input, { flex: 1, marginTop: 0 }]} onSubmitEditing={addSub} />
++              <Pressable testID={TEMPLATES.subtaskAdd} onPress={addSub} style={styles.addSub}>
++                <Ionicons name="add" size={20} color={colors.primary} />
++              </Pressable>
++            </View>
++
++            {tplId ? (
++              <AttachmentsSection taskId={tplId} kind="template" onAuthError={onAuthError} />
++            ) : (
++              <Text style={styles.note}>📎 Dosya eklemek için önce şablonu kaydedin.</Text>
++            )}
++          </ScrollView>
++
++          <Pressable testID={TEMPLATES.save} onPress={save} disabled={saving}
++            style={({ pressed }) => [styles.saveBtn, (pressed || saving) && styles.pressed]}>
++            {saving ? <ActivityIndicator color={colors.bgBase} /> : (
++              <Text style={styles.saveText}>{tplId ? "GÜNCELLE" : "KAYDET"}</Text>
++            )}
++          </Pressable>
++        </View>
++      </View>
++    </Modal>
++  );
++};
++
++const styles = StyleSheet.create({
++  backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.7)", justifyContent: "flex-end" },
++  card: {
++    backgroundColor: colors.surface,
++    borderTopLeftRadius: radius.lg,
++    borderTopRightRadius: radius.lg,
++    borderWidth: 1,
++    borderColor: colors.primary,
++    maxHeight: "92%",
++    padding: spacing.lg,
++  },
++  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.md },
++  headerTitle: { color: colors.primary, fontSize: 15, fontWeight: "800", fontFamily: monoFont, letterSpacing: 1 },
++  label: { color: colors.textMuted, fontSize: 11, fontFamily: monoFont, letterSpacing: 1, marginTop: spacing.md, marginBottom: 6 },
++  input: {
++    backgroundColor: colors.bgBase,
++    borderWidth: 1,
++    borderColor: colors.border,
++    borderRadius: radius.md,
++    paddingHorizontal: spacing.md,
++    paddingVertical: 10,
++    color: colors.textPrimary,
++    fontSize: 14,
++  },
++  textarea: { minHeight: 60, textAlignVertical: "top" },
++  row: { flexDirection: "row", gap: spacing.sm, alignItems: "center" },
++  toggle: {
++    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
++    borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, paddingVertical: 10,
++  },
++  toggleOn: { borderColor: colors.primary, backgroundColor: colors.primary + "22" },
++  toggleText: { color: colors.textMuted, fontSize: 13, fontWeight: "700" },
++  toggleTextOn: { color: colors.primary },
++  chipsWrap: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
++  chip: {
++    borderWidth: 1, borderColor: colors.border, borderRadius: radius.pill,
++    paddingHorizontal: 12, paddingVertical: 6, maxWidth: 160,
++  },
++  chipOn: { borderColor: colors.primary, backgroundColor: colors.primary + "22" },
++  chipText: { color: colors.textMuted, fontSize: 12, fontFamily: monoFont },
++  chipTextOn: { color: colors.primary },
++  subRow: {
++    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
++    borderWidth: 1, borderColor: colors.border, borderRadius: radius.md,
++    paddingHorizontal: spacing.md, paddingVertical: 10, marginBottom: 6,
++  },
++  subText: { flex: 1, color: colors.textPrimary, fontSize: 13, marginRight: spacing.sm },
++  addSub: { borderWidth: 1, borderColor: colors.primary, borderRadius: radius.md, padding: 9 },
++  note: { color: colors.textMuted, fontStyle: "italic", fontSize: 12, marginTop: spacing.md },
++  saveBtn: {
++    backgroundColor: colors.primary, borderRadius: radius.md, paddingVertical: 14,
++    alignItems: "center", marginTop: spacing.md,
++  },
++  saveText: { color: colors.bgBase, fontSize: 15, fontWeight: "800", fontFamily: monoFont, letterSpacing: 1 },
++  pressed: { opacity: 0.7 },
++});
++
++export default TemplateFormModal;
+diff --git a/mobile/src/lib/taskClipboard.ts b/mobile/src/lib/taskClipboard.ts
+new file mode 100644
+index 0000000..cc352ba
+--- /dev/null
++++ b/mobile/src/lib/taskClipboard.ts
+@@ -0,0 +1,65 @@
++// Görev Kopyalama Panosu (Kopyala → Yapıştır) — mobil.
++// Kopyalanan görev "pano"da tutulur; kullanıcı bir iş kolu başlığındaki
++// "Yapıştır" düğmesine dokununca o iş koluna çoğaltılır. Pano ELLE
++// temizlenene kadar kalır → aynı görev birden fazla iş koluna yapıştırılabilir.
++// storage'da (JSON string) kalıcı + pub/sub ile canlı güncellenir.
++import { useEffect, useState } from "react";
++import { storage } from "@/src/utils/storage";
++
++const KEY = "sertex.task.clipboard.v1";
++
++export type TaskClip = {
++  sourceId: string;
++  title: string;
++  includeSubtasks: boolean;
++  includeAttachments: boolean;
++};
++
++let state: TaskClip | null = null;
++let hydrated = false;
++const subs = new Set<(c: TaskClip | null) => void>();
++
++function emit() {
++  subs.forEach((fn) => fn(state));
++}
++
++async function hydrate() {
++  if (hydrated) return;
++  hydrated = true;
++  try {
++    const raw = await storage.getItem<string | null>(KEY, null);
++    state = raw ? (JSON.parse(raw) as TaskClip) : null;
++  } catch {
++    state = null;
++  }
++  emit();
++}
++
++export function getTaskClipboard(): TaskClip | null {
++  return state;
++}
++
++export function setTaskClipboard(clip: TaskClip | null) {
++  state = clip;
++  if (clip) storage.setItem(KEY, JSON.stringify(clip));
++  else storage.removeItem(KEY);
++  emit();
++}
++
++export function clearTaskClipboard() {
++  setTaskClipboard(null);
++}
++
++export function useTaskClipboard(): TaskClip | null {
++  const [clip, setClip] = useState<TaskClip | null>(state);
++  useEffect(() => {
++    const fn = (c: TaskClip | null) => setClip(c);
++    subs.add(fn);
++    setClip(state);
++    if (!hydrated) hydrate();
++    return () => {
++      subs.delete(fn);
++    };
++  }, []);
++  return clip;
++}
